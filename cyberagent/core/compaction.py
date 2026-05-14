@@ -96,27 +96,28 @@ class ContextCompressor:
     def find_cut_point(self, messages: list[dict[str, str]]) -> int:
         """找到切割点（对齐 pi findCutPoint）
 
-        从最新消息向前遍历，累加 token，当累积超过 keep_recent_tokens
-        时找到最近的合法切割点。合法切割点在 user/assistant/system 消息处，
-        永不切断 tool 消息。
+        从最新消息向前遍历，累加 token。记录最近的合法切割点候选，
+        当累积超过 keep_recent_tokens 时返回该候选。
+        合法切割点在 user/assistant/system 消息处，永不切断 tool 消息。
         """
         keep_tokens = self.settings.keep_recent_tokens
         accumulated = 0
+        last_valid_cut: int | None = None
 
-        # 从后向前遍历
         for i in range(len(messages) - 1, -1, -1):
             content = messages[i].get("content", "")
             accumulated += self.estimate_tokens(content)
 
             role = messages[i].get("role", "")
 
-            # 超过 keep_recent_tokens 且在合法切割点
-            if accumulated >= keep_tokens and role in ("user", "assistant", "system"):
-                # 确保不会在 tool result 中间切割
-                # 检查下一条消息是否是 tool（如果是，跳过）
-                if i + 1 < len(messages) and messages[i + 1].get("role") == "tool":
-                    continue
-                return i
+            # 合法切割点：user/assistant/system，且下一条不是 tool
+            if role in ("user", "assistant", "system"):
+                if not (i + 1 < len(messages) and messages[i + 1].get("role") == "tool"):
+                    last_valid_cut = i
+
+            # 累积超过阈值且有合法候选
+            if accumulated >= keep_tokens and last_valid_cut is not None:
+                return last_valid_cut
 
         # 找不到切割点，保留全部
         return 0

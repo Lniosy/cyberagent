@@ -169,8 +169,8 @@ class SessionManager:
         self._leaf_id = entry.id
         self._dirty.append(entry)
 
-        # 延迟写入策略（对齐 pi）：assistant 消息到达后才 flush
-        if role in ("assistant", "compaction"):
+        # 写入策略：assistant/compaction/tool 消息立即 flush，防止崩溃丢数据
+        if role in ("assistant", "compaction", "tool"):
             self._flush()
 
         return entry

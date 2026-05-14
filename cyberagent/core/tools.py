@@ -139,9 +139,13 @@ class ToolRegistry:
             except Exception as e:
                 logger.warning("[tools] beforeHook 异常: %s", e)
 
+        # 过滤多余参数（LLM 可能返回 schema 中未定义的字段）
+        valid_params = set(tool.parameters.get("properties", {}).keys())
+        filtered_args = {k: v for k, v in args.items() if k in valid_params}
+
         # 执行
         try:
-            result = await tool.execute(**args)
+            result = await tool.execute(**filtered_args)
             elapsed = time.time() - start_time
             result.metadata["elapsed"] = round(elapsed, 2)
             result.metadata["tool"] = tool_name
@@ -198,18 +202,30 @@ class ToolRegistry:
                     break
             return results
         else:
-            # 并行执行
-            return await asyncio.gather(
-                *[self.execute(name, args, context) for name, args in calls]
+            # 并行执行（return_exceptions 防止单个工具异常导致整批失败）
+            results = await asyncio.gather(
+                *[self.execute(name, args, context) for name, args in calls],
+                return_exceptions=True,
             )
+            # 将异常转为 ToolResult
+            return [
+                r if isinstance(r, ToolResult) else ToolResult(content=str(r), is_error=True)
+                for r in results
+            ]
 
 
 # ---- 内置钩子 ----
 
+_blocked_tools: set[str] = set()
+
+
 async def safety_hook(tool: ToolDefinition, args: dict[str, Any]) -> dict[str, Any] | None:
-    """安全检查钩子 — 在工具执行前检查安全性"""
+    """安全检查钩子 — 在工具执行前检查安全性，拦截受限工具"""
     if tool.safety_level == "restricted":
-        logger.warning("[safety] 受限工具 %s 被调用，参数: %s", tool.name, args)
+        logger.error("[safety] 拦截受限工具: %s", tool.name)
+        _blocked_tools.add(tool.name)
+        # 返回特殊标记，execute 方法会检查并阻止执行
+        raise PermissionError(f"工具 {tool.name} 被安全策略拦截（safety_level=restricted）")
     return None
 
 

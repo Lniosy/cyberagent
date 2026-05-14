@@ -26,6 +26,7 @@ Handoff 消息格式：
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -112,10 +113,13 @@ class HandoffManager:
         start_time = time.time()
 
         try:
-            # 启动目标 Agent 的 ReAct 循环
-            result = await target_agent.run(
-                target=context.get("target", ""),
-                initial_context=message,
+            # 启动目标 Agent 的 ReAct 循环（超时保护 10 分钟）
+            result = await asyncio.wait_for(
+                target_agent.run(
+                    target=context.get("target", ""),
+                    initial_context=message,
+                ),
+                timeout=600,
             )
 
             elapsed = time.time() - start_time

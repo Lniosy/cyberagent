@@ -190,16 +190,16 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
 
         # ---- Phase 1: 侦察 ----
         if not skip_recon:
-        console.print("\n[bold cyan]═══ Phase 1: 侦察 ═══[/bold cyan]")
-        ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm,
-                          metadata={"local_mode": local, "extra_ports": extra_ports or []})
-        agent = ReconAgent(ctx)
-        recon_results = await agent.run()
-        recon_path = out_dir / f"recon_{domain_key}.json"
-        with open(recon_path, "w", encoding="utf-8") as f:
-            json.dump(recon_results, f, ensure_ascii=False, indent=2, default=str)
-        console.print(f"[green]侦察结果已保存: {recon_path}[/green]")
-    else:
+            console.print("\n[bold cyan]═══ Phase 1: 侦察 ═══[/bold cyan]")
+            ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm,
+                              metadata={"local_mode": local, "extra_ports": extra_ports or []})
+            agent = ReconAgent(ctx)
+            recon_results = await agent.run()
+            recon_path = out_dir / f"recon_{domain_key}.json"
+            with open(recon_path, "w", encoding="utf-8") as f:
+                json.dump(recon_results, f, ensure_ascii=False, indent=2, default=str)
+            console.print(f"[green]侦察结果已保存: {recon_path}[/green]")
+        else:
         recon_path = out_dir / f"recon_{domain_key}.json"
         if recon_path.exists():
             with open(recon_path, "r", encoding="utf-8") as f:

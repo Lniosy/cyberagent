@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
 from typing import Any
 
 from cyberagent.core.tools import ToolDefinition, ToolResult, ToolRegistry, create_default_registry
 from cyberagent.core.findings_pool import FindingsPool, SharedFinding
-from cyberagent.core.shell_executor import run_command, resolve_tool, check_tool_exists
+from cyberagent.core.shell_executor import run_command, run_commands, resolve_tool, check_tool_exists
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,7 @@ async def _subdomain_enum(domain: str, pool: FindingsPool) -> ToolResult:
         return ToolResult(content="subfinder 未安装", is_error=True)
 
     bin_path = resolve_tool("subfinder")
-    r = await run_command(f"{bin_path} -d {domain} -silent -all", timeout=120)
+    r = await run_command([bin_path, "-d", domain, "-silent", "-all"], timeout=120)
 
     subs = [l.strip() for l in r.lines if l.strip() and "." in l.strip()]
     if domain not in subs:
@@ -333,7 +334,7 @@ async def _subdomain_enum(domain: str, pool: FindingsPool) -> ToolResult:
 async def _port_scan(host: str, ports: str, pool: FindingsPool) -> ToolResult:
     """端口扫描"""
     bin_path = resolve_tool("nmap")
-    r = await run_command(f"{bin_path} -sV -T4 -p {ports} -oX - {host}", timeout=120)
+    r = await run_command([bin_path, "-sV", "-T4", "-p", ports, "-oX", "-", host], timeout=120)
 
     open_ports = []
     import re
@@ -353,7 +354,7 @@ async def _port_scan(host: str, ports: str, pool: FindingsPool) -> ToolResult:
 
 async def _http_probe(url: str, pool: FindingsPool) -> ToolResult:
     """HTTP 探测"""
-    r = await run_command(f"curl -sI -m 10 -L '{url}'", timeout=15)
+    r = await run_command(f"curl -sI -m 10 -L {shlex.quote(url)}", timeout=15)
     if not r.success:
         return ToolResult(content=f"HTTP 探测失败: {r.stderr}", is_error=True)
 
@@ -390,7 +391,8 @@ async def _api_enum(base_url: str, pool: FindingsPool) -> ToolResult:
     found = []
 
     from cyberagent.core.shell_executor import run_commands
-    cmds = [f"curl -s -o /dev/null -w '%{{http_code}} {base}{p}' -m 3 '{base}{p}'" for p in paths]
+    safe_base = shlex.quote(base)
+    cmds = [f"curl -s -o /dev/null -w '%{{http_code}} {base}{p}' -m 3 {shlex.quote(base + p)}" for p in paths]
     results = await run_commands(cmds, timeout=5, max_concurrent=10)
 
     for r in results:
@@ -412,7 +414,7 @@ async def _api_enum(base_url: str, pool: FindingsPool) -> ToolResult:
 
 async def _js_analyze(url: str, pool: FindingsPool) -> ToolResult:
     """JS 文件分析"""
-    r = await run_command(f"curl -sL -m 10 '{url}'", timeout=15)
+    r = await run_command(f"curl -sL -m 10 {shlex.quote(url)}", timeout=15)
     if not r.success:
         return ToolResult(content="获取页面失败", is_error=True)
 
@@ -430,7 +432,7 @@ async def _js_analyze(url: str, pool: FindingsPool) -> ToolResult:
             base_path = parsed.path.rsplit("/", 1)[0] if "/" in parsed.path else ""
             js_url = f"{parsed.scheme}://{parsed.netloc}{base_path}/{js_url}"
 
-        js_r = await run_command(f"curl -sL -m 10 '{js_url}'", timeout=15)
+        js_r = await run_command(f"curl -sL -m 10 {shlex.quote(js_url)}", timeout=15)
         if not js_r.success:
             continue
 
@@ -485,7 +487,7 @@ async def _test_sqli(url: str, param: str, pool: FindingsPool) -> ToolResult:
             test_params_dict[pname] = payload
             test_url = urlunparse(parsed._replace(query=urlencode(test_params_dict)))
 
-            r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
+            r = await run_command(f"curl -sL -m 10 {shlex.quote(test_url)}", timeout=15)
             if r.success and error_patterns.search(r.stdout):
                 results.append(f"  [CONFIRMED] 参数 {pname}: SQL 错误 (payload: {payload})")
                 pool.add(SharedFinding(
@@ -522,7 +524,7 @@ async def _test_xss(url: str, param: str, pool: FindingsPool) -> ToolResult:
             test_params_dict[pname] = payload
             test_url = urlunparse(parsed._replace(query=urlencode(test_params_dict)))
 
-            r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
+            r = await run_command(f"curl -sL -m 10 {shlex.quote(test_url)}", timeout=15)
             if r.success and marker in r.stdout:
                 results.append(f"  [CONFIRMED] 参数 {pname}: XSS 反射")
                 pool.add(SharedFinding(
@@ -541,8 +543,8 @@ async def _test_xss(url: str, param: str, pool: FindingsPool) -> ToolResult:
 async def _test_idor(endpoint: str, pool: FindingsPool) -> ToolResult:
     """IDOR 检测"""
     base = endpoint.rstrip("/")
-    r1 = await run_command(f"curl -sL -m 10 '{base}/1'", timeout=15)
-    r2 = await run_command(f"curl -sL -m 10 '{base}/2'", timeout=15)
+    r1 = await run_command(f"curl -sL -m 10 {shlex.quote(base + '/1')}", timeout=15)
+    r2 = await run_command(f"curl -sL -m 10 {shlex.quote(base + '/2')}", timeout=15)
 
     if r1.success and r2.success and len(r1.stdout) > 50 and len(r2.stdout) > 50:
         if "<!doctype html>" not in r1.stdout.lower()[:200]:
@@ -561,7 +563,7 @@ async def _test_graphql(endpoint: str, pool: FindingsPool) -> ToolResult:
     """GraphQL 检测"""
     introspection = '{"query":"{ __schema { types { name } } }"}'
     r = await run_command(
-        f"curl -sL -m 10 -X POST -H 'Content-Type: application/json' -d '{introspection}' '{endpoint}'",
+        f"curl -sL -m 10 -X POST -H 'Content-Type: application/json' -d {shlex.quote(introspection)} {shlex.quote(endpoint)}",
         timeout=15,
     )
 
@@ -584,7 +586,7 @@ async def _test_graphql(endpoint: str, pool: FindingsPool) -> ToolResult:
 async def _test_cors(url: str, pool: FindingsPool) -> ToolResult:
     """CORS 检测"""
     evil = "https://evil.com"
-    r = await run_command(f"curl -sI -m 5 -H 'Origin: {evil}' '{url}'", timeout=10)
+    r = await run_command(f"curl -sI -m 5 -H {shlex.quote('Origin: ' + evil)} {shlex.quote(url)}", timeout=10)
 
     if r.success:
         import re
@@ -609,7 +611,7 @@ async def _test_cors(url: str, pool: FindingsPool) -> ToolResult:
 
 async def _test_headers(url: str, pool: FindingsPool) -> ToolResult:
     """安全头审计"""
-    r = await run_command(f"curl -sI -m 5 '{url}'", timeout=10)
+    r = await run_command(f"curl -sI -m 5 {shlex.quote(url)}", timeout=10)
     if not r.success:
         return ToolResult(content="获取响应头失败", is_error=True)
 
@@ -639,8 +641,8 @@ async def _test_headers(url: str, pool: FindingsPool) -> ToolResult:
 
 async def _cve_query(keyword: str, min_cvss: float) -> ToolResult:
     """CVE 查询"""
-    url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch={keyword}&resultsPerPage=10"
-    r = await run_command(f"curl -sL -m 15 '{url}'", timeout=20)
+    url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch={shlex.quote(keyword)}&resultsPerPage=10"
+    r = await run_command(f"curl -sL -m 15 {shlex.quote(url)}", timeout=20)
 
     if not r.success:
         return ToolResult(content="CVE 查询失败", is_error=True)
@@ -673,10 +675,8 @@ async def _cve_query(keyword: str, min_cvss: float) -> ToolResult:
 
 async def _poc_search(cve_id: str) -> ToolResult:
     """PoC 搜索"""
-    r = await run_command(
-        f"curl -sL -m 15 'https://api.github.com/search/repositories?q={cve_id}+poc&sort=stars&per_page=3'",
-        timeout=20,
-    )
+    search_url = f"https://api.github.com/search/repositories?q={shlex.quote(cve_id + '+poc')}&sort=stars&per_page=3"
+    r = await run_command(f"curl -sL -m 15 {shlex.quote(search_url)}", timeout=20)
 
     if not r.success:
         return ToolResult(content="GitHub 搜索失败", is_error=True)

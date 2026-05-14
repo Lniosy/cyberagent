@@ -160,8 +160,8 @@ class AgentLoop:
                     response = await self._call_llm(messages)
                 except Exception as e:
                     # 错误编码进 context（对齐 pi handleRunFailure）
-                    error_msg = f"LLM 调用失败: {str(e)}。请分析原因并尝试其他方法。"
-                    self.session.append(role="assistant", content=error_msg)
+                    error_msg = f"[系统提示] LLM 调用失败: {str(e)}。请分析原因并尝试其他方法，不要放弃任务。"
+                    self.session.append(role="system", content=error_msg)
                     logger.error("[loop] LLM 调用失败: %s", e)
                     has_more_tools = False
                     continue

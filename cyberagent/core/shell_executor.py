@@ -20,7 +20,12 @@ _BLOCKED_COMMANDS = re.compile(
     r'\b(rm\s+-rf|mkfs|dd\s+if=|format\s+[a-z]:|shutdown|reboot|halt|poweroff|init\s+0)\b',
     re.IGNORECASE,
 )
-_BLOCKED_SHELL_CHARS = re.compile(r';\s*rm\b|\|\s*rm\b|`rm\b|\$\(rm\b')
+# 拦截所有危险 shell 元字符组合（不限于 rm，包括 curl/wget/python/bash/nc 等）
+_BLOCKED_SHELL_INJECTION = re.compile(
+    r'(?:;\s*|\|\s*|`\s*|\$\()\s*(?:curl|wget|python|bash|sh|nc|ncat|socat|'
+    r'rm|chmod|chown|kill|pkill|killall|nohup|setsid)\b',
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -54,7 +59,7 @@ async def run_command(
     logger.info("执行命令: %s (timeout=%ds)", cmd_str, timeout)
 
     # 安全检查：拦截危险命令
-    if _BLOCKED_COMMANDS.search(cmd_str) or _BLOCKED_SHELL_CHARS.search(cmd_str):
+    if _BLOCKED_COMMANDS.search(cmd_str) or _BLOCKED_SHELL_INJECTION.search(cmd_str):
         logger.error("[SAFETY] 拦截危险命令: %s", cmd_str)
         return ShellResult(
             command=cmd_str, returncode=-1, stdout="",
