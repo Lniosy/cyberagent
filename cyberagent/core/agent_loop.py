@@ -26,6 +26,7 @@ from cyberagent.core.llm_client import LLMClient
 from cyberagent.core.session import SessionManager
 from cyberagent.core.compaction import ContextCompressor
 from cyberagent.core.tools import ToolRegistry, ToolResult
+from cyberagent.core.skill_loader import SkillLoader
 from cyberagent.core.safety import get_safety_checker
 
 logger = logging.getLogger(__name__)
@@ -55,11 +56,24 @@ AGENT_SYSTEM_PROMPT = """你是一个专业的网络安全自动化 Agent，负�
 ## 工作流程
 1. 先侦察（了解目标）
 2. 根据侦察结果选择最有价值的测试
-3. 并行执行多个独立测试
-4. 分析结果，决定下一步
-5. 重复 2-4 直到测试充分
-6. 生成最终报告
-7. 调用 complete_task 结束
+3. 使用 load_skill 加载对应漏洞类型的详细知识（省 token，按需加载）
+4. 并行执行多个独立测试
+5. 分析结果，决定下一步
+6. 重复 2-5 直到测试充分
+7. 生成最终报告
+8. 调用 complete_task 结束
+
+## Skill 知识库
+你有一个按需加载的安全知识库，包含 100+ 种漏洞类型的详细测试方法。
+使用 load_skill(vuln_type="xxx") 加载对应知识，获得：
+- 针对性 payload（比内置的更全面）
+- 绕过技巧（WAF 绕过、编码变换）
+- 真实 CVE 场景
+- 检测方法和验证步骤
+
+可用的 skill 类型：sqli, xss, ssrf, idor, csrf, xxe, ssti, nosqli, graphql, jwt, cors,
+upload, cmd_injection, dir_traversal, open_redirect, race_condition, request_smuggling,
+prototype_pollution, subdomain_takeover, waf_bypass, auth_bypass, api_sec
 
 ## 重要
 - 每次回复时，说明你的思考过程和下一步计划
@@ -93,12 +107,14 @@ class AgentLoop:
         session: SessionManager,
         compressor: ContextCompressor | None = None,
         config: AgentLoopConfig | None = None,
+        skill_loader: SkillLoader | None = None,
     ):
         self.llm = llm
         self.tools = tools
         self.session = session
         self.compressor = compressor
         self.config = config or AgentLoopConfig()
+        self.skill_loader = skill_loader or SkillLoader()
 
         self._steering_queue: asyncio.Queue[str] = asyncio.Queue()
         self._followup_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -280,6 +296,25 @@ class AgentLoop:
         # 构建带工具定义的请求
         tool_schemas = self.tools.get_schemas_for_llm()
 
+        # 添加内置 load_skill 工具
+        tool_schemas.append({
+            "type": "function",
+            "function": {
+                "name": "load_skill",
+                "description": "加载安全测试知识库中的 skill。按需加载，省 token。获取针对性 payload、绕过技巧、检测方法。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "vuln_type": {
+                            "type": "string",
+                            "description": "漏洞类型，如 sqli, xss, ssrf, idor, graphql, jwt, ssti, nosqli, xxe, cors, csrf, upload, cmd_injection, race_condition, request_smuggling 等",
+                        },
+                    },
+                    "required": ["vuln_type"],
+                },
+            },
+        })
+
         # DeepSeek 兼容 OpenAI 格式
         response = await self.llm.chat_with_tools(
             messages=messages,
@@ -325,8 +360,31 @@ class AgentLoop:
         if not calls:
             return
 
-        # 批量执行（根据 executionMode 自动决定并行/串行）
-        results = await self.tools.execute_batch(calls)
+        # 分离内置工具和注册工具
+        builtin_calls = []
+        registry_calls = []
+        for name, args in calls:
+            if name == "load_skill":
+                builtin_calls.append((name, args))
+            else:
+                registry_calls.append((name, args))
+
+        # 执行内置工具（load_skill）
+        for name, args in builtin_calls:
+            vuln_type = args.get("vuln_type", "")
+            skill_content = self.skill_loader.load_for_vuln_type(vuln_type)
+            if not skill_content:
+                skill_content = f"未找到 {vuln_type} 类型的 skill。可用类型: {', '.join(self.skill_loader.available_skills[:20])}"
+            result = ToolResult(content=skill_content[:3000])
+            self.session.append(
+                role="tool", content=result.content,
+                tool_name=name, tool_args=args,
+                tool_result=result.to_dict(),
+            )
+
+        # 批量执行注册工具（根据 executionMode 自动决定并行/串行）
+        results = await self.tools.execute_batch(registry_calls)
+        calls = registry_calls  # 后续只处理注册工具的结果
 
         # 记录结果到 session
         for (name, args), result in zip(calls, results):

@@ -107,6 +107,11 @@ async def _run_agent(domain: str, max_turns: int, max_time: int,
     # 创建压缩器
     compressor = ContextCompressor(llm)
 
+    # 加载 skill 知识库
+    from cyberagent.core.skill_loader import SkillLoader
+    skill_loader = SkillLoader()
+    console.print(f"[green]Skill 知识库: {len(skill_loader.available_skills)} 个 skill 可用[/green]")
+
     # 创建 Agent 循环
     loop = AgentLoop(
         llm=llm,
@@ -114,6 +119,7 @@ async def _run_agent(domain: str, max_turns: int, max_time: int,
         session=session,
         compressor=compressor,
         config=config,
+        skill_loader=skill_loader,
     )
 
     # 构建初始上下文
