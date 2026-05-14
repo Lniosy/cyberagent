@@ -1,0 +1,27 @@
+[project]
+name = "cyberagent"
+version = "0.1.0"
+description = "AI-driven automated vulnerability discovery agent for bug bounty"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.50.0",
+    "httpx>=0.27.0",
+    "aiosqlite>=0.20.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "rich>=13.9.0",
+    "click>=8.1.0",
+    "beautifulsoup4>=4.12.0",
+    "tldextract>=5.1.0",
+    "dnspython>=2.7.0",
+]
+
+[project.scripts]
+cyberagent = "cyberagent.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["cyberagent*"]

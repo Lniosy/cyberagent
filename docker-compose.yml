@@ -1,0 +1,19 @@
+services:
+  cyberagent:
+    build: .
+    container_name: cyberagent
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+    # 默认进入 recon 子命令
+    command: ["--help"]
+
+  # 快速侦察示例: docker compose run recon example.com
+  recon:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+    entrypoint: ["cyberagent", "recon"]

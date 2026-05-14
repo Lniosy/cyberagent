@@ -1,0 +1,24 @@
+services:
+  # OWASP Juice Shop 靶场
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    container_name: juice-shop
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  # CyberAgent（与靶场同网络）
+  cyberagent:
+    build: .
+    container_name: cyberagent-test
+    env_file: .env
+    depends_on:
+      - juice-shop
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+    entrypoint: ["cyberagent", "recon"]
+    # 需要传入 juice-shop 作为目标
+    command: ["juice-shop"]
+    networks:
+      - default
