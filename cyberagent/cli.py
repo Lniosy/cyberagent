@@ -55,7 +55,7 @@ def auto(domain: str, local: bool, port: tuple[int, ...],
 
 async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | None = None,
                     skip_recon: bool = False, skip_scan: bool = False, skip_report: bool = False):
-    """全自动流水线"""
+    """全自动流水线（含错误恢复和资源保护）"""
     from cyberagent.agents.reporter import ReportAgent
 
     domain = domain.lower().strip()
@@ -74,16 +74,17 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
     db = Database()
     db.connect()
     llm = LLMClient()
-    target_id = db.get_or_create_target(domain)
     out_dir = PROJECT_ROOT / "output"
     out_dir.mkdir(exist_ok=True)
     domain_key = domain.replace(".", "_")
 
-    recon_results: dict = {}
-    scan_results: dict = {}
+    try:
+        target_id = db.get_or_create_target(domain)
+        recon_results: dict = {}
+        scan_results: dict = {}
 
-    # ---- Phase 1: 侦察 ----
-    if not skip_recon:
+        # ---- Phase 1: 侦察 ----
+        if not skip_recon:
         console.print("\n[bold cyan]═══ Phase 1: 侦察 ═══[/bold cyan]")
         ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm,
                           metadata={"local_mode": local, "extra_ports": extra_ports or []})
@@ -144,7 +145,13 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
             for fmt, path in files.items():
                 console.print(f"  {fmt}: {path}")
 
-    db.close()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]用户中断，正在清理...[/yellow]")
+    except Exception as e:
+        console.print(f"\n[bold red]流水线异常: {e}[/bold red]")
+        logger.error("流水线异常", exc_info=True)
+    finally:
+        db.close()
 
     # ---- 最终总结（含成本统计）----
     cost_info = llm.stats.summary()

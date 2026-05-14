@@ -4,12 +4,13 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, APIStatusError, APITimeoutError, APIConnectionError
 
 from cyberagent.core.config import get_settings
 
@@ -158,29 +159,59 @@ class LLMClient:
         user_prompt: str,
         system_prompt: str,
         temperature: float,
+        max_retries: int = 3,
     ) -> str:
         logger.debug("LLM call: model=%s, prompt_len=%d", model, len(user_prompt))
-        response = await self._client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-        )
-        content = response.choices[0].message.content or ""
 
-        # Token 统计
-        usage = response.usage
-        if usage:
-            self.stats.record(
-                model,
-                usage.prompt_tokens or 0,
-                usage.completion_tokens or 0,
-            )
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = await self._client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=temperature,
+                    timeout=60,
+                )
+                content = response.choices[0].message.content or ""
 
-        logger.debug("LLM response len=%d", len(content))
-        return content
+                # Token 统计
+                usage = response.usage
+                if usage:
+                    self.stats.record(
+                        model,
+                        usage.prompt_tokens or 0,
+                        usage.completion_tokens or 0,
+                    )
+
+                logger.debug("LLM response len=%d", len(content))
+                return content
+
+            except (APITimeoutError, APIConnectionError) as e:
+                last_error = e
+                wait = 2 ** attempt
+                logger.warning("[LLM] 连接/超时错误 (attempt %d/%d), %ds后重试: %s",
+                               attempt + 1, max_retries, wait, e)
+                await asyncio.sleep(wait)
+
+            except APIStatusError as e:
+                last_error = e
+                if e.status_code in (429, 500, 502, 503):
+                    wait = 2 ** attempt * (2 if e.status_code == 429 else 1)
+                    logger.warning("[LLM] HTTP %d (attempt %d/%d), %ds后重试",
+                                   e.status_code, attempt + 1, max_retries, wait)
+                    await asyncio.sleep(wait)
+                else:
+                    raise
+
+            except Exception as e:
+                logger.error("[LLM] 不可恢复错误: %s", e)
+                raise
+
+        logger.error("[LLM] %d 次重试全部失败", max_retries)
+        raise last_error
 
     @staticmethod
     def _parse_json(text: str) -> dict[str, Any]:

@@ -1,10 +1,15 @@
-"""异步 Shell 命令执行器，用于调用外部安全工具"""
+"""异步 Shell 命令执行器，用于调用外部安全工具
+
+使用进程组管理防止僵尸进程（start_new_session + killpg）
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shlex
-from dataclasses import dataclass, field
+import signal
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +36,7 @@ async def run_command(
     timeout: int = 120,
     cwd: str | None = None,
 ) -> ShellResult:
-    """执行单个命令，返回结果"""
+    """执行单个命令，返回结果。使用进程组管理防止僵尸进程。"""
     if isinstance(cmd, list):
         cmd_str = " ".join(shlex.quote(c) for c in cmd)
     else:
@@ -45,6 +50,7 @@ async def run_command(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            start_new_session=True,  # 创建新进程组，方便整体终止
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -59,8 +65,8 @@ async def run_command(
                 stderr=stderr,
             )
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            # 终止整个进程组（包括孙进程）
+            _kill_process_group(proc)
             return ShellResult(
                 command=cmd_str,
                 returncode=-1,
@@ -75,6 +81,19 @@ async def run_command(
             stdout="",
             stderr=str(e),
         )
+
+
+def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
+    """终止进程组中的所有进程"""
+    try:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        # 进程已退出
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
 
 
 async def run_commands(
@@ -104,7 +123,6 @@ _GO_TOOLS = {"httpx", "subfinder", "nuclei", "katana", "gau", "unfurl", "assetfi
 
 def resolve_tool(tool_name: str) -> str:
     """解析工具的实际路径，Go 安全工具优先于 PATH 中的同名 Python 工具"""
-    import os
     import shutil
 
     if tool_name in _GO_TOOLS:

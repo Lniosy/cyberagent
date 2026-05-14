@@ -300,24 +300,34 @@ class ScannerAgent(BaseAgent):
             return_exceptions=True,
         )
 
+        failed_modules = []
         for (name, _), result in zip(scan_tasks, results):
             if isinstance(result, Exception):
                 logger.error("[scanner] 模块 %s 异常: %s", name, result)
+                failed_modules.append({"module": name, "error": str(result)})
             elif result:
                 logger.info("[scanner] 模块 %s 发现 %d 个问题", name, len(result))
 
-        # LLM 综合分析
-        if self.findings:
-            analysis = await self._analyze_findings()
-        else:
-            analysis = {"summary": "未发现漏洞", "risk_level": "low"}
-
-        # 存入数据库
+        # 立即写入数据库（防止后续 LLM 分析失败丢失数据）
         for f in self.findings:
             self.ctx.db.insert_finding(
                 self.ctx.target_id, f.vuln_type, f.title,
                 f.detail, f.severity, f.evidence,
             )
+
+        # LLM 综合分析（失败不丢失已有 findings）
+        if self.findings:
+            try:
+                analysis = await self._analyze_findings()
+            except Exception as e:
+                logger.error("[scanner] LLM 分析失败: %s", e)
+                analysis = {
+                    "summary": f"发现 {len(self.findings)} 个漏洞（LLM 分析失败）",
+                    "risk_level": "high",
+                    "error": str(e),
+                }
+        else:
+            analysis = {"summary": "未发现漏洞", "risk_level": "low"}
 
         return {
             "findings": [
@@ -337,6 +347,7 @@ class ScannerAgent(BaseAgent):
             "total_findings": len(self.findings),
             "analysis": analysis,
             "targets_scanned": len(targets["urls"]),
+            "failed_modules": failed_modules,
         }
 
     # ---- API 端点枚举 ----

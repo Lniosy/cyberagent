@@ -177,10 +177,12 @@ class ReconAgent(BaseAgent):
 
         logger.info("[recon] 使用 httpx 探测 %d 个目标...", len(probe_targets))
 
-        # 写入临时文件
-        tmp_input = "/tmp/cyberagent_subs.txt"
-        with open(tmp_input, "w") as f:
-            f.write("\n".join(probe_targets))
+        # 写入临时文件（使用唯一文件名避免并发冲突）
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", prefix="cyberagent_", delete=False)
+        tmp.write("\n".join(probe_targets))
+        tmp_input = tmp.name
+        tmp.close()
 
         result = await run_command(
             f"{httpx_bin} -l {tmp_input} -silent -status-code -title -tech-detect "
