@@ -144,6 +144,74 @@ class LLMClient:
         """使用 Flash 模型进行简单任务"""
         return await self._call(self._flash_model, user_prompt, system_prompt, temperature)
 
+    async def chat_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+    ) -> str:
+        """带 function calling 的 LLM 调用（Agent Loop 专用）"""
+        use_model = model or self._pro_model
+        logger.debug("LLM tool call: model=%s, messages=%d, tools=%d",
+                      use_model, len(messages), len(tools) if tools else 0)
+
+        kwargs: dict[str, Any] = {
+            "model": use_model,
+            "messages": messages,
+            "temperature": 0.1,
+            "timeout": 120,
+        }
+        if tools:
+            kwargs["tools"] = tools
+
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = await self._client.chat.completions.create(**kwargs)
+                msg = response.choices[0].message
+
+                # Token 统计
+                usage = response.usage
+                if usage:
+                    self.stats.record(
+                        use_model,
+                        usage.prompt_tokens or 0,
+                        usage.completion_tokens or 0,
+                    )
+
+                # 构建响应（含 tool_calls）
+                result: dict[str, Any] = {"role": "assistant"}
+                if msg.content:
+                    result["content"] = msg.content
+                if msg.tool_calls:
+                    result["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ]
+
+                return json.dumps(result, ensure_ascii=False)
+
+            except (APITimeoutError, APIConnectionError) as e:
+                last_error = e
+                wait = 2 ** attempt
+                logger.warning("[LLM] 重试 %d/3, %ds: %s", attempt + 1, wait, e)
+                await asyncio.sleep(wait)
+            except APIStatusError as e:
+                if e.status_code in (429, 500, 502, 503):
+                    last_error = e
+                    await asyncio.sleep(2 ** attempt)
+                else:
+                    raise
+
+        raise last_error  # type: ignore
+
     async def chat_json_pro(
         self,
         user_prompt: str,
