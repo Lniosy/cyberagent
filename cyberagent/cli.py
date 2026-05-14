@@ -20,6 +20,7 @@ from cyberagent.agents.base import AgentContext
 from cyberagent.agents.recon import ReconAgent
 from cyberagent.agents.scanner import ScannerAgent
 from cyberagent.agents.reporter import ReportAgent
+from cyberagent.agents.vuln_intel import VulnIntelAgent
 
 console = Console()
 
@@ -102,6 +103,26 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
             console.print(f"[yellow]跳过侦察，加载已有结果: {recon_path}[/yellow]")
         else:
             console.print("[yellow]跳过侦察，无已有结果[/yellow]")
+
+    # ---- Phase 1.5: 漏洞情报（CVE + PoC）----
+    vuln_intel_results: dict = {}
+    if not skip_scan and recon_results:
+        console.print("\n[bold yellow]═══ Phase 1.5: 漏洞情报 ═══[/bold yellow]")
+        ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm)
+        intel_agent = VulnIntelAgent(ctx, recon_results=recon_results)
+        try:
+            vuln_intel_results = await intel_agent.run()
+            intel_path = out_dir / f"intel_{domain_key}.json"
+            with open(intel_path, "w", encoding="utf-8") as f:
+                json.dump(vuln_intel_results, f, ensure_ascii=False, indent=2, default=str)
+            console.print(f"[green]漏洞情报已保存: {intel_path}[/green]")
+
+            total_cves = vuln_intel_results.get("total_cves", 0)
+            safe_pocs = vuln_intel_results.get("safe_pocs", 0)
+            dangerous_pocs = vuln_intel_results.get("dangerous_pocs", 0)
+            console.print(f"  CVE: {total_cves} | 安全PoC: {safe_pocs} | 危险PoC(已拦截): {dangerous_pocs}")
+        except Exception as e:
+            console.print(f"[yellow]漏洞情报阶段异常: {e}[/yellow]")
 
     # ---- Phase 2: 扫描 ----
     if not skip_scan:
