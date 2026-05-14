@@ -437,6 +437,80 @@ class VulnIntelAgent(BaseAgent):
 
         return pocs
 
+    # ---- 安全 PoC 执行 ----
+
+    async def execute_safe_poc(self, poc: PoCItem, target_url: str) -> dict[str, Any]:
+        """安全执行已审核通过的 PoC
+
+        安全约束：
+        1. 只执行 safety_status == "safe" 的 PoC
+        2. 在独立临时文件中执行，设置 30s 超时
+        3. 注入目标 URL，替换 PoC 中的占位符
+        4. 限制输出大小（防止数据外泄）
+        """
+        if poc.safety_status != "safe":
+            return {
+                "executed": False,
+                "reason": f"PoC 安全状态不是 safe（当前: {poc.safety_status}）",
+                "issues": poc.safety_issues,
+            }
+
+        if not poc.poc_code:
+            return {"executed": False, "reason": "无 PoC 代码"}
+
+        # 注入目标 URL
+        code = poc.poc_code
+        code = code.replace("{{TARGET_URL}}", target_url)
+        code = code.replace("{{TARGET}}", self.ctx.target_domain)
+
+        # 添加安全包装
+        safe_header = """import sys, signal
+def _timeout(signum, frame):
+    print("[SAFETY] 超时终止"); sys.exit(1)
+signal.signal(signal.SIGALRM, _timeout)
+signal.alarm(30)
+_builtins_print = __builtins__.__dict__.get('print', print) if hasattr(__builtins__, '__dict__') else print
+import builtins as _b
+_orig = _b.print
+def _safe_print(*a, **k):
+    s = ' '.join(str(x) for x in a)
+    if len(s) > 2000: s = s[:2000] + '...[SAFETY_TRUNCATED]'
+    _orig(s, **k)
+_b.print = _safe_print
+try:
+"""
+        safe_footer = """
+except Exception as e:
+    print(f"[PoC Error] {e}")
+finally:
+    signal.alarm(0)
+"""
+        safe_code = safe_header + "\n".join(f"  {line}" for line in code.split("\n")) + safe_footer
+
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".py", prefix="poc_safe_", delete=False)
+        tmp.write(safe_code)
+        tmp_path = tmp.name
+        tmp.close()
+
+        try:
+            result = await run_command(
+                f"python3 {tmp_path}",
+                timeout=35,
+            )
+            return {
+                "executed": True,
+                "cve_id": poc.cve_id,
+                "stdout": result.stdout[:2000],
+                "stderr": result.stderr[:500],
+                "returncode": result.returncode,
+                "timed_out": result.timed_out,
+            }
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
     # ---- LLM 辅助 PoC 生成 ----
 
     async def _generate_pocs(self, cves: list[CVEItem]) -> list[PoCItem]:
