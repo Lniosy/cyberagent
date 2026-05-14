@@ -19,6 +19,7 @@ from cyberagent.core.llm_client import LLMClient
 from cyberagent.agents.base import AgentContext
 from cyberagent.agents.recon import ReconAgent
 from cyberagent.agents.scanner import ScannerAgent
+from cyberagent.agents.reporter import ReportAgent
 
 console = Console()
 
@@ -349,9 +350,105 @@ def _print_scan_results(results: dict):
 
 
 @main.command()
-@click.argument("db_path", type=click.Path(exists=True), required=False)
-def report(db_path: str | None):
-    """从数据库生成侦察报告"""
+@click.argument("domain")
+@click.option("--recon-file", "-r", type=click.Path(exists=True), help="侦察结果JSON文件")
+@click.option("--scan-file", "-s", type=click.Path(exists=True), help="扫描结果JSON文件")
+def report(domain: str, recon_file: str | None, scan_file: str | None):
+    """生成 SRC 格式漏洞报告"""
+    setup_logging()
+    asyncio.run(_run_report(domain, recon_file, scan_file))
+
+
+async def _run_report(domain: str, recon_file: str | None, scan_file: str | None):
+    """异步生成报告"""
+    domain = domain.lower().strip()
+    console.print(Panel(
+        f"[bold magenta]CyberAgent Reporter[/bold magenta]\n目标: [bold]{domain}[/bold]",
+        title="生成报告",
+    ))
+
+    settings = get_settings()
+    if not settings.deepseek_api_key:
+        console.print("[bold red]错误: 未设置 DEEPSEEK_API_KEY[/bold red]")
+        sys.exit(1)
+
+    # 加载侦察结果
+    recon_results = {}
+    if recon_file:
+        with open(recon_file, "r", encoding="utf-8") as f:
+            recon_results = json.load(f)
+    else:
+        default_path = PROJECT_ROOT / "output" / f"recon_{domain.replace('.', '_')}.json"
+        if default_path.exists():
+            with open(default_path, "r", encoding="utf-8") as f:
+                recon_results = json.load(f)
+
+    # 加载扫描结果
+    scan_results = {}
+    if scan_file:
+        with open(scan_file, "r", encoding="utf-8") as f:
+            scan_results = json.load(f)
+    else:
+        default_path = PROJECT_ROOT / "output" / f"scan_{domain.replace('.', '_')}.json"
+        if default_path.exists():
+            with open(default_path, "r", encoding="utf-8") as f:
+                scan_results = json.load(f)
+
+    if not scan_results and not recon_results:
+        console.print("[yellow]未找到侦察或扫描结果，请先运行 recon 和 scan 命令[/yellow]")
+        return
+
+    db = Database()
+    db.connect()
+    llm = LLMClient()
+    target_id = db.get_or_create_target(domain)
+
+    ctx = AgentContext(
+        target_domain=domain, target_id=target_id, db=db, llm=llm,
+    )
+
+    agent = ReportAgent(ctx, recon_results=recon_results, scan_results=scan_results)
+    try:
+        results = await agent.run()
+    finally:
+        db.close()
+
+    # 展示结果
+    reports = results.get("reports", [])
+    summary = results.get("summary", {})
+    files = results.get("files", {})
+
+    console.print(f"\n[bold]报告生成完成[/bold] — {len(reports)} 个漏洞报告\n")
+
+    if summary:
+        risk = summary.get("risk_rating", "unknown")
+        risk_style = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}.get(risk, "white")
+        console.print(Panel(
+            summary.get("executive_summary", ""),
+            title=f"[{risk_style}]风险评级: {risk.upper()}[/{risk_style}]",
+        ))
+
+    if files:
+        console.print("[bold]输出文件:[/bold]")
+        for fmt, path in files.items():
+            console.print(f"  {fmt}: {path}")
+
+    if reports:
+        table = Table(title="漏洞报告列表")
+        table.add_column("#", style="dim")
+        table.add_column("标题")
+        table.add_column("类型")
+        table.add_column("严重性", style="red")
+        for i, r in enumerate(reports, 1):
+            sev = r.get("severity", "")
+            sev_style = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}.get(sev, "white")
+            table.add_row(str(i), r.get("title", ""), r.get("vuln_type", ""), f"[{sev_style}]{sev}[/{sev_style}]")
+        console.print(table)
+
+
+@main.command()
+def db_status():
+    """查看数据库中的目标和发现"""
     setup_logging()
     db = Database()
     db.connect()
