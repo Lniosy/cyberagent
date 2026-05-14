@@ -41,6 +41,110 @@ def main():
 
 @main.command()
 @click.argument("domain")
+@click.option("--max-turns", default=50, help="最大轮次（防无限循环）")
+@click.option("--max-time", default=1800, help="最大运行时间（秒）")
+@click.option("--local", is_flag=True, help="本地目标模式")
+@click.option("--port", "-p", multiple=True, type=int, help="额外探测端口")
+@click.option("--resume", is_flag=True, help="断点续扫（从上次中断处继续）")
+def agent(domain: str, max_turns: int, max_time: int, local: bool,
+          port: tuple[int, ...], resume: bool):
+    """自主 Agent 模式：LLM 自主决策，无人值守完成安全评估"""
+    setup_logging()
+    asyncio.run(_run_agent(domain, max_turns, max_time, local, list(port), resume))
+
+
+async def _run_agent(domain: str, max_turns: int, max_time: int,
+                     local: bool, extra_ports: list[int], resume: bool):
+    """自主 Agent 运行"""
+    from cyberagent.core.agent_loop import AgentLoop, AgentLoopConfig
+    from cyberagent.core.session import SessionManager
+    from cyberagent.core.compaction import ContextCompressor
+    from cyberagent.core.tools import create_default_registry
+    from cyberagent.core.security_tools import register_all_tools
+    from cyberagent.core.findings_pool import FindingsPool
+
+    domain = domain.lower().strip()
+    console.print(Panel(
+        f"[bold cyan]CyberAgent — 自主模式[/bold cyan]\n"
+        f"目标: [bold]{domain}[/bold]\n"
+        f"最大轮次: {max_turns} | 最大时间: {max_time}s\n"
+        f"模式: {'本地' if local else '远程'} {'(断点续扫)' if resume else ''}",
+        title="自主 Agent 启动",
+    ))
+
+    settings = get_settings()
+    if not settings.deepseek_api_key:
+        console.print("[bold red]错误: 未设置 DEEPSEEK_API_KEY[/bold red]")
+        sys.exit(1)
+
+    # 初始化组件
+    llm = LLMClient()
+    pool = FindingsPool()
+
+    # 会话管理（断点续扫 or 新建）
+    if resume:
+        session = SessionManager.continue_recent(domain)
+        if session:
+            console.print(f"[green]恢复会话: {session.entry_count} 条历史记录[/green]")
+        else:
+            console.print("[yellow]未找到历史会话，创建新会话[/yellow]")
+            session = SessionManager.create(domain)
+    else:
+        session = SessionManager.create(domain)
+
+    # 注册工具
+    registry = create_default_registry()
+    register_all_tools(registry, pool, llm=llm, target=domain)
+
+    # 配置
+    config = AgentLoopConfig(
+        max_turns=max_turns,
+        max_time=max_time,
+        auto_mode=True,
+        compaction_enabled=True,
+    )
+
+    # 创建压缩器
+    compressor = ContextCompressor(llm)
+
+    # 创建 Agent 循环
+    loop = AgentLoop(
+        llm=llm,
+        tools=registry,
+        session=session,
+        compressor=compressor,
+        config=config,
+    )
+
+    # 构建初始上下文
+    initial_ctx = f"目标: {domain}\n"
+    if local:
+        initial_ctx += f"本地模式，额外端口: {extra_ports}\n"
+    initial_ctx += f"已注册 {len(registry.get_all())} 个安全工具。\n"
+    initial_ctx += pool.to_context_string()
+
+    try:
+        # 运行自主循环
+        stats = await loop.run(target=domain, initial_context=initial_ctx)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]用户中断[/yellow]")
+        loop.abort()
+        session.force_flush()
+        stats = {"aborted": True}
+
+    # 输出统计
+    console.print(Panel(
+        f"轮次: {stats.get('turns', 0)} | "
+        f"耗时: {stats.get('elapsed', 0)}s | "
+        f"完成: {stats.get('task_complete', False)}\n"
+        f"发现: {pool.summary()}\n"
+        f"LLM: {llm.stats.summary()['total']}",
+        title="[bold green]Agent 运行结束[/bold green]",
+    ))
+
+
+@main.command()
+@click.argument("domain")
 @click.option("--local", is_flag=True, help="本地目标模式")
 @click.option("--port", "-p", multiple=True, type=int, help="额外探测端口")
 @click.option("--skip-recon", is_flag=True, help="跳过侦察（使用已有结果）")
@@ -48,7 +152,7 @@ def main():
 @click.option("--skip-report", is_flag=True, help="跳过报告生成")
 def auto(domain: str, local: bool, port: tuple[int, ...],
          skip_recon: bool, skip_scan: bool, skip_report: bool):
-    """全自动流水线：侦察 → 扫描 → 报告"""
+    """全自动流水线：侦察 → 扫描 → 报告（旧模式）"""
     setup_logging()
     asyncio.run(_run_auto(domain, local=local, extra_ports=list(port),
                           skip_recon=skip_recon, skip_scan=skip_scan, skip_report=skip_report))
