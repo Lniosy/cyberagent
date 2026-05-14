@@ -1,8 +1,12 @@
-"""DeepSeek LLM 客户端，兼容 OpenAI SDK"""
+"""DeepSeek LLM 客户端，兼容 OpenAI SDK
+
+集成 token 统计和成本追踪（参考 pi 的 SessionStats 设计）
+"""
 from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -27,9 +31,89 @@ SYSTEM_PROMPT_RECON = """你是一个专业的网络安全侦察分析专家。�
   "suggested_next_steps": ["建议的下一步操作"]
 }"""
 
+# DeepSeek 定价（每百万 token，单位 USD）
+# 参考 https://api-docs.deepseek.com/quick_start/pricing
+DEEPSEEK_PRICING = {
+    "deepseek-v4-pro": {"input": 0.27, "output": 1.10},
+    "deepseek-v4-flash": {"input": 0.07, "output": 0.28},
+}
+
+
+@dataclass
+class TokenStats:
+    """Token 统计"""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    call_count: int = 0
+
+
+@dataclass
+class SessionStats:
+    """会话统计 — 追踪所有 LLM 调用的成本"""
+    pro: TokenStats = field(default_factory=TokenStats)
+    flash: TokenStats = field(default_factory=TokenStats)
+
+    @property
+    def total_cost(self) -> float:
+        return self.pro.cost_usd + self.flash.cost_usd
+
+    @property
+    def total_calls(self) -> int:
+        return self.pro.call_count + self.flash.call_count
+
+    @property
+    def total_tokens(self) -> int:
+        return self.pro.total_tokens + self.flash.total_tokens
+
+    def record(self, model: str, input_tokens: int, output_tokens: int):
+        """记录一次 LLM 调用的 token 用量"""
+        total = input_tokens + output_tokens
+        pricing = DEEPSEEK_PRICING.get(model, {"input": 0.27, "output": 1.10})
+        cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+
+        if "flash" in model:
+            target = self.flash
+        else:
+            target = self.pro
+
+        target.input_tokens += input_tokens
+        target.output_tokens += output_tokens
+        target.total_tokens += total
+        target.cost_usd += cost
+        target.call_count += 1
+
+        logger.info(
+            "[cost] %s: %d in + %d out = $%.4f (累计: $%.4f, %d calls, %d tokens)",
+            model, input_tokens, output_tokens, cost,
+            self.total_cost, self.total_calls, self.total_tokens,
+        )
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "pro": {
+                "calls": self.pro.call_count,
+                "input_tokens": self.pro.input_tokens,
+                "output_tokens": self.pro.output_tokens,
+                "cost_usd": round(self.pro.cost_usd, 4),
+            },
+            "flash": {
+                "calls": self.flash.call_count,
+                "input_tokens": self.flash.input_tokens,
+                "output_tokens": self.flash.output_tokens,
+                "cost_usd": round(self.flash.cost_usd, 4),
+            },
+            "total": {
+                "calls": self.total_calls,
+                "tokens": self.total_tokens,
+                "cost_usd": round(self.total_cost, 4),
+            },
+        }
+
 
 class LLMClient:
-    """封装 DeepSeek API 调用"""
+    """封装 DeepSeek API 调用，集成 token 统计"""
 
     def __init__(self):
         settings = get_settings()
@@ -39,6 +123,7 @@ class LLMClient:
         )
         self._pro_model = settings.deepseek_pro_model
         self._flash_model = settings.deepseek_flash_model
+        self.stats = SessionStats()
 
     async def chat_pro(
         self,
@@ -84,6 +169,16 @@ class LLMClient:
             temperature=temperature,
         )
         content = response.choices[0].message.content or ""
+
+        # Token 统计
+        usage = response.usage
+        if usage:
+            self.stats.record(
+                model,
+                usage.prompt_tokens or 0,
+                usage.completion_tokens or 0,
+            )
+
         logger.debug("LLM response len=%d", len(content))
         return content
 

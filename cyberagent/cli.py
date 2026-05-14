@@ -146,12 +146,18 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
 
     db.close()
 
-    # ---- 最终总结 ----
+    # ---- 最终总结（含成本统计）----
+    cost_info = llm.stats.summary()
+    total_cost = cost_info["total"]["cost_usd"]
+    total_calls = cost_info["total"]["calls"]
+    total_tokens = cost_info["total"]["tokens"]
+
     console.print(Panel(
         f"侦察: {'完成' if not skip_recon else '跳过'} | "
         f"扫描: {'完成' if not skip_scan else '跳过'} | "
         f"报告: {'完成' if not skip_report else '跳过'}\n"
-        f"漏洞数: {scan_results.get('total_findings', 0) if not skip_scan else 'N/A'}",
+        f"漏洞数: {scan_results.get('total_findings', 0) if not skip_scan else 'N/A'}\n"
+        f"LLM 调用: {total_calls} 次 | Token: {total_tokens:,} | 成本: ${total_cost:.4f}",
         title="[bold green]流水线完成[/bold green]",
     ))
 

