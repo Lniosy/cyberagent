@@ -18,6 +18,7 @@ from cyberagent.core.database import Database
 from cyberagent.core.llm_client import LLMClient
 from cyberagent.agents.base import AgentContext
 from cyberagent.agents.recon import ReconAgent
+from cyberagent.agents.scanner import ScannerAgent
 
 console = Console()
 
@@ -210,6 +211,141 @@ def _print_results(results: dict, domain: str):
 
     elapsed = results.get("_elapsed", 0)
     console.print(f"\n[bold green]侦察完成[/bold green] — 耗时 {elapsed}s")
+
+
+@main.command()
+@click.argument("domain")
+@click.option("--recon-file", "-r", type=click.Path(exists=True), help="侦察结果JSON文件路径")
+@click.option("--output", "-o", type=click.Path(), help="结果输出路径 (JSON)")
+@click.option("--local", is_flag=True, help="本地目标模式")
+def scan(domain: str, recon_file: str | None, output: str | None, local: bool):
+    """对目标执行漏洞扫描（需先运行recon或提供recon结果文件）"""
+    setup_logging()
+    asyncio.run(_run_scan(domain, recon_file, output, local=local))
+
+
+async def _run_scan(domain: str, recon_file: str | None, output: str | None, local: bool = False):
+    """异步执行漏洞扫描"""
+    domain = domain.lower().strip()
+    console.print(Panel(
+        f"[bold red]CyberAgent Scanner[/bold red]\n目标: [bold]{domain}[/bold]",
+        title="漏洞扫描",
+    ))
+
+    settings = get_settings()
+    if not settings.deepseek_api_key:
+        console.print("[bold red]错误: 未设置 DEEPSEEK_API_KEY[/bold red]")
+        sys.exit(1)
+
+    # 加载侦察结果
+    recon_results = {}
+    if recon_file:
+        with open(recon_file, "r", encoding="utf-8") as f:
+            recon_results = json.load(f)
+        console.print(f"[green]已加载侦察结果: {recon_file}[/green]")
+    else:
+        # 尝试从默认路径加载
+        default_path = PROJECT_ROOT / "output" / f"recon_{domain.replace('.', '_')}.json"
+        if default_path.exists():
+            with open(default_path, "r", encoding="utf-8") as f:
+                recon_results = json.load(f)
+            console.print(f"[green]已加载侦察结果: {default_path}[/green]")
+        else:
+            console.print("[yellow]未找到侦察结果，将直接扫描目标[/yellow]")
+            recon_results = {
+                "stages": {
+                    "http_probe": {"targets": [{"url": f"http://{domain}:3000" if local else f"http://{domain}"}]},
+                    "port_scan": {"open_ports": [{"host": domain, "port": 3000}] if local else []},
+                    "js_analysis": [],
+                },
+                "analysis": {},
+            }
+
+    db = Database()
+    db.connect()
+    llm = LLMClient()
+    target_id = db.get_or_create_target(domain)
+    db.update_target_status(target_id, "scanning")
+
+    ctx = AgentContext(
+        target_domain=domain, target_id=target_id, db=db, llm=llm,
+        metadata={"local_mode": local},
+    )
+
+    agent = ScannerAgent(ctx, recon_results=recon_results)
+    try:
+        results = await agent.run()
+    finally:
+        db.close()
+
+    _print_scan_results(results)
+
+    if output:
+        out_path = Path(output)
+    else:
+        out_dir = PROJECT_ROOT / "output"
+        out_dir.mkdir(exist_ok=True)
+        out_path = out_dir / f"scan_{domain.replace('.', '_')}.json"
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+    console.print(f"\n[green]结果已保存到: {out_path}[/green]")
+
+
+def _print_scan_results(results: dict):
+    """美化输出扫描结果"""
+    findings = results.get("findings", [])
+    total = results.get("total_findings", 0)
+
+    console.print(f"\n[bold]扫描完成[/bold] — 发现 [bold red]{total}[/bold red] 个漏洞\n")
+
+    if not findings:
+        console.print("[green]未发现漏洞[/green]")
+        return
+
+    table = Table(title="漏洞发现")
+    table.add_column("类型", style="cyan")
+    table.add_column("标题")
+    table.add_column("URL", style="blue")
+    table.add_column("参数")
+    table.add_column("严重性", style="red")
+    table.add_column("置信度")
+
+    for f in findings:
+        sev = f.get("severity", "info")
+        sev_style = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}.get(sev, "white")
+        conf = f.get("confidence", "")
+        conf_style = {"confirmed": "bold green", "probable": "green", "possible": "yellow"}.get(conf, "white")
+
+        table.add_row(
+            f.get("vuln_type", ""),
+            (f.get("title", "") or "")[:40],
+            (f.get("url", "") or "")[:40],
+            f.get("parameter", ""),
+            f"[{sev_style}]{sev}[/{sev_style}]",
+            f"[{conf_style}]{conf}[/{conf_style}]",
+        )
+
+    console.print(table)
+
+    # 打印 PoC
+    for f in findings:
+        if f.get("poc"):
+            console.print(f"\n[bold yellow]PoC — {f['title']}[/bold yellow]")
+            console.print(f"  {f['poc']}")
+
+    # LLM 分析
+    analysis = results.get("analysis", {})
+    if analysis:
+        console.print(Panel(
+            analysis.get("summary", ""),
+            title=f"[bold magenta]风险评估: {analysis.get('risk_level', 'unknown').upper()}[/bold magenta]",
+        ))
+        if analysis.get("remediation"):
+            tree = Tree("[bold]修复建议[/bold]")
+            for r in analysis["remediation"]:
+                tree.add(r)
+            console.print(tree)
 
 
 @main.command()
