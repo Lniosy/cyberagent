@@ -11,7 +11,7 @@ AI 驱动的自动化漏洞挖掘 Agent，面向 SRC 赏金计划。
 | Phase 2 | 扫描 Agent | ✅ 完成 | SQLi/XSS/SSRF/IDOR/Open Redirect/目录遍历/命令注入 + Nuclei |
 | Phase 2 | 报告 Agent | ✅ 完成 | LLM生成SRC格式报告（Markdown/HTML/JSON），含PoC和修复建议 |
 | Phase 2 | Docker 部署 | ✅ 完成 | Dockerfile + docker-compose + 靶场环境 |
-| Phase 3 | 编排器 | 🔲 计划中 | recon → scan → report 全自动流水线 |
+| Phase 3 | 编排器 | ✅ 完成 | `cyberagent auto` 一键全自动流水线 |
 | Phase 3 | 增强扫描 | 🔲 计划中 | GraphQL注入、JWT攻击、CORS检测、安全头审计 |
 | Phase 3 | 真实SRC实战 | 🔲 计划中 | 对接公开SRC项目进行实战测试 |
 | Phase 4 | Web UI | 🔲 计划中 | 可视化Dashboard，任务管理，报告查看 |
@@ -79,17 +79,19 @@ cp .env.example .env
 ### 使用
 
 ```bash
-# 1. 侦察
-cyberagent recon example.com
-cyberagent recon localhost --local -p 3000  # 本地靶场
+# 一键全自动（推荐）
+cyberagent auto example.com
+cyberagent auto localhost --local -p 3000  # 本地靶场
 
-# 2. 漏洞扫描（加载侦察结果）
-cyberagent scan example.com
-cyberagent scan localhost --local -r output/recon_localhost.json
+# 分步执行
+cyberagent recon example.com              # 1. 侦察
+cyberagent scan example.com               # 2. 扫描
+cyberagent report example.com             # 3. 生成报告
 
-# 3. 生成报告（加载侦察+扫描结果）
-cyberagent report example.com
-cyberagent report localhost -r output/recon_localhost.json -s output/scan_localhost.json
+# 控制选项
+cyberagent auto target.com --skip-recon   # 跳过侦察（使用已有结果）
+cyberagent auto target.com --skip-scan    # 跳过扫描
+cyberagent auto target.com --skip-report  # 跳过报告
 
 # 查看数据库状态
 cyberagent db-status

@@ -40,6 +40,124 @@ def main():
 
 @main.command()
 @click.argument("domain")
+@click.option("--local", is_flag=True, help="本地目标模式")
+@click.option("--port", "-p", multiple=True, type=int, help="额外探测端口")
+@click.option("--skip-recon", is_flag=True, help="跳过侦察（使用已有结果）")
+@click.option("--skip-scan", is_flag=True, help="跳过扫描")
+@click.option("--skip-report", is_flag=True, help="跳过报告生成")
+def auto(domain: str, local: bool, port: tuple[int, ...],
+         skip_recon: bool, skip_scan: bool, skip_report: bool):
+    """全自动流水线：侦察 → 扫描 → 报告"""
+    setup_logging()
+    asyncio.run(_run_auto(domain, local=local, extra_ports=list(port),
+                          skip_recon=skip_recon, skip_scan=skip_scan, skip_report=skip_report))
+
+
+async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | None = None,
+                    skip_recon: bool = False, skip_scan: bool = False, skip_report: bool = False):
+    """全自动流水线"""
+    from cyberagent.agents.reporter import ReportAgent
+
+    domain = domain.lower().strip()
+    console.print(Panel(
+        f"[bold cyan]CyberAgent Auto[/bold cyan]\n"
+        f"目标: [bold]{domain}[/bold]\n"
+        f"模式: {'本地' if local else '远程'}",
+        title="全自动流水线",
+    ))
+
+    settings = get_settings()
+    if not settings.deepseek_api_key:
+        console.print("[bold red]错误: 未设置 DEEPSEEK_API_KEY[/bold red]")
+        sys.exit(1)
+
+    db = Database()
+    db.connect()
+    llm = LLMClient()
+    target_id = db.get_or_create_target(domain)
+    out_dir = PROJECT_ROOT / "output"
+    out_dir.mkdir(exist_ok=True)
+    domain_key = domain.replace(".", "_")
+
+    recon_results: dict = {}
+    scan_results: dict = {}
+
+    # ---- Phase 1: 侦察 ----
+    if not skip_recon:
+        console.print("\n[bold cyan]═══ Phase 1: 侦察 ═══[/bold cyan]")
+        ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm,
+                          metadata={"local_mode": local, "extra_ports": extra_ports or []})
+        agent = ReconAgent(ctx)
+        recon_results = await agent.run()
+        recon_path = out_dir / f"recon_{domain_key}.json"
+        with open(recon_path, "w", encoding="utf-8") as f:
+            json.dump(recon_results, f, ensure_ascii=False, indent=2, default=str)
+        console.print(f"[green]侦察结果已保存: {recon_path}[/green]")
+    else:
+        recon_path = out_dir / f"recon_{domain_key}.json"
+        if recon_path.exists():
+            with open(recon_path, "r", encoding="utf-8") as f:
+                recon_results = json.load(f)
+            console.print(f"[yellow]跳过侦察，加载已有结果: {recon_path}[/yellow]")
+        else:
+            console.print("[yellow]跳过侦察，无已有结果[/yellow]")
+
+    # ---- Phase 2: 扫描 ----
+    if not skip_scan:
+        console.print("\n[bold red]═══ Phase 2: 漏洞扫描 ═══[/bold red]")
+        ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm,
+                          metadata={"local_mode": local})
+        agent = ScannerAgent(ctx, recon_results=recon_results)
+        scan_results = await agent.run()
+        scan_path = out_dir / f"scan_{domain_key}.json"
+        with open(scan_path, "w", encoding="utf-8") as f:
+            json.dump(scan_results, f, ensure_ascii=False, indent=2, default=str)
+        console.print(f"[green]扫描结果已保存: {scan_path}[/green]")
+
+        # 打印扫描摘要
+        total = scan_results.get("total_findings", 0)
+        if total > 0:
+            console.print(f"[bold red]发现 {total} 个漏洞[/bold red]")
+            for finding in scan_results.get("findings", []):
+                sev = finding.get("severity", "info")
+                style = {"critical": "bold red", "high": "red", "medium": "yellow"}.get(sev, "white")
+                console.print(f"  [{style}][{sev.upper()}][/{style}] {finding.get('title', '')}")
+        else:
+            console.print("[green]未发现漏洞[/green]")
+
+    # ---- Phase 3: 报告 ----
+    if not skip_report:
+        console.print("\n[bold magenta]═══ Phase 3: 生成报告 ═══[/bold magenta]")
+        ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm)
+        agent = ReportAgent(ctx, recon_results=recon_results, scan_results=scan_results)
+        report_results = await agent.run()
+
+        files = report_results.get("files", {})
+        summary = report_results.get("summary", {})
+
+        risk = summary.get("risk_rating", "unknown")
+        risk_style = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}.get(risk, "white")
+        console.print(f"\n[{risk_style}]风险评级: {risk.upper()}[/{risk_style}]")
+
+        if files:
+            console.print("[bold]报告文件:[/bold]")
+            for fmt, path in files.items():
+                console.print(f"  {fmt}: {path}")
+
+    db.close()
+
+    # ---- 最终总结 ----
+    console.print(Panel(
+        f"侦察: {'完成' if not skip_recon else '跳过'} | "
+        f"扫描: {'完成' if not skip_scan else '跳过'} | "
+        f"报告: {'完成' if not skip_report else '跳过'}\n"
+        f"漏洞数: {scan_results.get('total_findings', 0) if not skip_scan else 'N/A'}",
+        title="[bold green]流水线完成[/bold green]",
+    ))
+
+
+@main.command()
+@click.argument("domain")
 @click.option("--output", "-o", type=click.Path(), help="结果输出路径 (JSON)")
 @click.option("--local", is_flag=True, help="本地目标模式（跳过子域名枚举，直接探测目标）")
 @click.option("--port", "-p", multiple=True, type=int, help="要额外探测的端口")
