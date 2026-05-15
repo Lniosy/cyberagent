@@ -31,33 +31,32 @@ from cyberagent.core.safety import get_safety_checker
 
 logger = logging.getLogger(__name__)
 
-# 系统 prompt — 定义 Agent 的身份和行为
-AGENT_SYSTEM_PROMPT = """你是一个专业的网络安全自动化 Agent，负责对目标进行全面的安全评估。
+# 系统 prompt — 定义 Agent 的身份和行为（行动导向，防止分析循环）
+AGENT_SYSTEM_PROMPT = """你是一个专业的网络安全自动化渗透测试 Agent。
 
-## 你的能力
-你有以下工具可用（通过 function calling 调用）：
-- 侦察工具：子域名枚举、端口扫描、HTTP探测、JS分析、WAF检测
-- 漏洞扫描：SQL注入、XSS、SSRF、IDOR、GraphQL、JWT、SSTI等18种检测
-- 情报工具：CVE查询、GitHub PoC搜索
-- 分析工具：LLM深度分析、动态payload生成
-- 报告工具：生成漏洞报告
+## 核心原则：行动优先
+你的任务是**执行测试**，不是反复分析。每一轮你必须调用至少一个测试工具。
+绝对不要连续两轮只调用 get_findings_summary 或 analyze_findings。
 
-## 行为规则
-1. **自主决策**：根据当前信息决定下一步行动，不要等待用户指令
-2. **不放弃任务**：遇到错误时分析原因，尝试其他方法，不要停下来
-3. **效率优先**：如果初始上下文已知目标端口，直接探测该端口，不要扫描全端口
-4. **避免重复**：不要重复已经失败的相同操作，换策略或换目标
-5. **安全红线**：
-   - 禁止对目标执行增删改操作
-   - 禁止 DDoS 或资源耗尽
-   - 只使用 GET/HEAD/OPTIONS 和受控的 POST
-   - PoC 必须经过安全审核
-4. **效率优先**：先做高价值的测试，避免重复工作
-5. **完成标准**：当所有可行的测试都已完成，生成报告后调用 complete_task
+## 可用工具
+侦察：subdomain_enum, port_scan, http_probe, api_enum, js_analyze
+扫描：test_sqli, test_xss, test_idor, test_graphql, test_cors, test_headers
+情报：cve_query, poc_search, load_skill
+分析：analyze_findings, get_findings_summary
+报告：generate_report, complete_task
 
-## 工作流程
-1. 先侦察（了解目标）
-2. 根据侦察结果选择最有价值的测试
+## 执行规则（必须遵守）
+1. **每轮必须行动**：调用至少一个侦察/扫描/情报工具，不要只分析不测试
+2. **侦察完成后立即测试**：有 API 端点就测 IDOR/SQLi，有参数就测 XSS
+3. **不重复相同操作**：同一个工具对同一个目标只调用一次
+4. **不放弃任务**：失败时换工具或换目标，不要停下来
+5. **已知端口直接用**：初始上下文有端口信息就直接探测，不扫描全端口
+6. **完成标准**：测试了至少 3 种漏洞类型后，调用 generate_report 和 complete_task
+
+## 安全红线（不可违反）
+- 只用 GET/HEAD/OPTIONS 和受控 POST
+- 禁止增删改操作、DDoS、数据窃取
+- PoC 必须安全审核
 3. 使用 load_skill 加载对应漏洞类型的详细知识（省 token，按需加载）
 4. 并行执行多个独立测试
 5. 分析结果，决定下一步
@@ -139,6 +138,7 @@ class AgentLoop:
         """
         self._start_time = time.time()
         self._turn_count = 0
+        self._recent_tools: list[str] = []  # 最近调用的工具名（卡住检测用）
 
         # 注入系统 prompt
         self.session.append(
@@ -412,3 +412,20 @@ class AgentLoop:
             if name == "complete_task":
                 self._task_complete = True
                 break
+
+        # 卡住检测：连续调用相同分析工具 3 次，注入强制行动指令
+        for name, _ in calls:
+            self._recent_tools.append(name)
+        self._recent_tools = self._recent_tools[-10:]  # 只保留最近 10 个
+
+        analysis_tools = {"get_findings_summary", "analyze_findings"}
+        recent_analysis = [t for t in self._recent_tools[-3:] if t in analysis_tools]
+        if len(recent_analysis) >= 3:
+            self.session.append(
+                role="system",
+                content="[系统提示] 你已连续 3 轮只做分析没有执行测试。"
+                        "请立即调用 test_sqli、test_xss、test_idor、test_graphql 等扫描工具执行实际测试。"
+                        "不要再调用 get_findings_summary 或 analyze_findings。",
+            )
+            self._recent_tools.clear()
+            logger.warning("[loop] 检测到分析循环，注入强制行动指令")
