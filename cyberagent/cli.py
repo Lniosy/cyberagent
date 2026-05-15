@@ -167,6 +167,70 @@ async def _run_agent(domain: str, max_turns: int, max_time: int,
 @click.argument("domain")
 @click.option("--local", is_flag=True, help="本地目标模式")
 @click.option("--port", "-p", multiple=True, type=int, help="额外探测端口")
+def team(domain: str, local: bool, port: tuple[int, ...]):
+    """团队模式：Coordinator Agent 动态调度所有 Agent（Helio 模式）"""
+    setup_logging()
+    asyncio.run(_run_team(domain, local, list(port)))
+
+
+async def _run_team(domain: str, local: bool = False, extra_ports: list[int] | None = None):
+    """Coordinator 团队模式"""
+    from cyberagent.core.agent_registry import AgentRegistry
+    from cyberagent.agents.coordinator import CoordinatorAgent, CommunicationChannel
+
+    domain = domain.lower().strip()
+    console.print(Panel(
+        f"[bold cyan]CyberAgent Team[/bold cyan]\n"
+        f"目标: [bold]{domain}[/bold]\n"
+        f"模式: Coordinator 动态调度",
+        title="团队模式",
+    ))
+
+    settings = get_settings()
+    if not settings.deepseek_api_key:
+        console.print("[bold red]错误: 未设置 DEEPSEEK_API_KEY[/bold red]")
+        sys.exit(1)
+
+    # 注册所有 Agent
+    registry = AgentRegistry()
+    registry.discover()
+    registry.load_config()
+    agents = registry.list_all()
+    console.print(f"[green]发现 {len(agents)} 个 Agent[/green]")
+
+    # 创建 Coordinator
+    llm = LLMClient()
+    channel = CommunicationChannel()
+    coordinator = CoordinatorAgent(llm=llm, registry=registry, channel=channel)
+
+    # 运行
+    config = {"local_mode": local, "extra_ports": extra_ports or []}
+    try:
+        results = await coordinator.run(target=domain, config=config)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]用户中断[/yellow]")
+        results = {}
+
+    # 输出活动面板
+    console.print("\n" + coordinator.activity.display())
+
+    # 成本统计
+    cost_info = llm.stats.summary()
+    console.print(Panel(
+        f"Agent 数: {len(results.get('agents', {}))} | "
+        f"耗时: {results.get('total_elapsed', 0)}s | "
+        f"频道消息: {channel.message_count}\n"
+        f"LLM: {cost_info['total']['calls']} 次 | "
+        f"Token: {cost_info['total']['tokens']:,} | "
+        f"成本: ${cost_info['total']['cost_usd']:.4f}",
+        title="[bold green]团队任务完成[/bold green]",
+    ))
+
+
+@main.command()
+@click.argument("domain")
+@click.option("--local", is_flag=True, help="本地目标模式")
+@click.option("--port", "-p", multiple=True, type=int, help="额外探测端口")
 @click.option("--skip-recon", is_flag=True, help="跳过侦察（使用已有结果）")
 @click.option("--skip-scan", is_flag=True, help="跳过扫描")
 @click.option("--skip-report", is_flag=True, help="跳过报告生成")
