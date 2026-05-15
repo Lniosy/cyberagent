@@ -51,7 +51,8 @@ def main(ctx, target: str | None, max_turns: int, max_time: int, resume: bool):
     """CyberAgent — AI驱动的自动化漏洞挖掘
 
     用法：
-      cyberagent <目标描述>           # 自然语言模式（推荐）
+      cyberagent                     # 启动交互式 TUI（推荐）
+      cyberagent <目标描述>           # 自然语言模式
       cyberagent agent <目标>         # 自主Agent模式
       cyberagent team <目标>          # 团队协作模式
       cyberagent auto <目标>          # 固定流水线模式
@@ -60,7 +61,10 @@ def main(ctx, target: str | None, max_turns: int, max_time: int, resume: bool):
     if ctx.invoked_subcommand is not None:
         return
     if target is None:
-        click.echo(ctx.get_help())
+        # 无参数时启动 TUI 交互模式
+        from cyberagent.tui import run_tui
+        setup_logging()
+        run_tui()
         return
 
     setup_logging()
