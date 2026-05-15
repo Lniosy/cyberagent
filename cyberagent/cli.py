@@ -125,7 +125,8 @@ async def _run_agent(domain: str, max_turns: int, max_time: int,
     # 构建初始上下文
     initial_ctx = f"目标: {domain}\n"
     if local:
-        initial_ctx += f"本地模式，额外端口: {extra_ports}\n"
+        initial_ctx += f"本地模式，已知开放端口: {extra_ports}\n"
+        initial_ctx += f"请直接使用 http://{domain}:{extra_ports[0]} 作为探测目标，不要扫描全端口。\n"
     initial_ctx += f"已注册 {len(registry.get_all())} 个安全工具。\n"
     initial_ctx += pool.to_context_string()
 
