@@ -109,6 +109,7 @@ class AgentLoop:
         compressor: ContextCompressor | None = None,
         config: AgentLoopConfig | None = None,
         skill_loader: SkillLoader | None = None,
+        knowledge: Any | None = None,
     ):
         self.llm = llm
         self.tools = tools
@@ -116,6 +117,7 @@ class AgentLoop:
         self.compressor = compressor
         self.config = config or AgentLoopConfig()
         self.skill_loader = skill_loader or SkillLoader()
+        self.knowledge = knowledge  # KnowledgeBase 实例
 
         self._steering_queue: asyncio.Queue[str] = asyncio.Queue()
         self._followup_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -151,10 +153,32 @@ class AgentLoop:
             metadata={"type": "system_prompt"},
         )
 
+        # 加载历史知识（如果知识库可用）
+        knowledge_context = ""
+        if self.knowledge:
+            try:
+                strategy = await self.knowledge.optimize_strategy(
+                    self.llm, target, tech_stack=[],
+                )
+                if strategy:
+                    knowledge_context = (
+                        f"\n\n## 历史经验（基于过往扫描）:\n"
+                        f"- 优先测试: {strategy.get('priority_tests', [])}\n"
+                        f"- 可跳过: {strategy.get('skip_tests', [])}\n"
+                        f"- Payload 建议: {json.dumps(strategy.get('payload_overrides', {}), ensure_ascii=False)}\n"
+                        f"- 绕过技巧: {strategy.get('bypass_hints', [])}\n"
+                        f"- 风险区域: {strategy.get('risk_areas', [])}\n"
+                    )
+                    logger.info("[loop] 加载历史知识: %s", strategy.get("reasoning", "")[:100])
+            except Exception as e:
+                logger.warning("[loop] 知识加载失败: %s", e)
+
         # 注入初始任务
         task_prompt = f"请对目标 {target} 进行全面的安全评估。"
         if initial_context:
             task_prompt += f"\n\n以下是已有的侦察结果：\n{initial_context}"
+        if knowledge_context:
+            task_prompt += knowledge_context
         task_prompt += "\n\n请开始自主执行安全测试。"
 
         self.session.append(role="user", content=task_prompt)
@@ -246,7 +270,25 @@ class AgentLoop:
             "aborted": self._abort,
             "session": self.session.summary(),
             "llm_stats": self.llm.stats.summary(),
+            "knowledge_extracted": 0,
         }
+
+        # 提取并存储知识（经验积累）
+        if self.knowledge and self._tested_vuln_types:
+            try:
+                tool_results = self.session.get_tool_results()
+                findings_data = self.session.get_entries_by_role("tool")
+                findings_summary = [
+                    {"tool": e.tool_name, "result": e.tool_result}
+                    for e in findings_data if e.tool_result
+                ]
+                extracted = await self.knowledge.extract_from_scan(
+                    self.llm, target, [], findings_summary, tool_results,
+                )
+                stats["knowledge_extracted"] = len(extracted)
+                logger.info("[knowledge] 提取 %d 条经验", len(extracted))
+            except Exception as e:
+                logger.warning("[knowledge] 经验提取失败: %s", e)
 
         logger.info("[loop] Agent 循环结束 — %d 轮, %.1fs, 完成=%s",
                      self._turn_count, elapsed, self._task_complete)

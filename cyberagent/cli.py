@@ -112,6 +112,13 @@ async def _run_agent(domain: str, max_turns: int, max_time: int,
     skill_loader = SkillLoader()
     console.print(f"[green]Skill 知识库: {len(skill_loader.available_skills)} 个 skill 可用[/green]")
 
+    # 加载知识库（经验积累）
+    from cyberagent.core.knowledge import KnowledgeBase
+    knowledge = KnowledgeBase()
+    knowledge.connect()
+    kb_stats = knowledge.get_stats()
+    console.print(f"[green]知识库: {kb_stats['total']} 条历史经验[/green]")
+
     # 创建 Agent 循环
     loop = AgentLoop(
         llm=llm,
@@ -120,6 +127,7 @@ async def _run_agent(domain: str, max_turns: int, max_time: int,
         compressor=compressor,
         config=config,
         skill_loader=skill_loader,
+        knowledge=knowledge,
     )
 
     # 构建初始上下文
@@ -140,14 +148,18 @@ async def _run_agent(domain: str, max_turns: int, max_time: int,
         stats = {"aborted": True}
 
     # 输出统计
+    kb_final = knowledge.get_stats()
     console.print(Panel(
         f"轮次: {stats.get('turns', 0)} | "
         f"耗时: {stats.get('elapsed', 0)}s | "
         f"完成: {stats.get('task_complete', False)}\n"
         f"发现: {pool.summary()}\n"
-        f"LLM: {llm.stats.summary()['total']}",
+        f"LLM: {llm.stats.summary()['total']}\n"
+        f"知识库: {kb_final['total']} 条经验 (新增 {stats.get('knowledge_extracted', 0)} 条)",
         title="[bold green]Agent 运行结束[/bold green]",
     ))
+
+    knowledge.close()
 
 
 @main.command()
