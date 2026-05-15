@@ -1,70 +1,64 @@
 # CyberAgent
 
-AI-driven automated vulnerability discovery agent for bug bounty programs.
+AI 驱动的自动化漏洞挖掘 Agent，面向 SRC 赏金计划。
 
-[中文文档](README_zh.md)
+[English](README_en.md)
 
-## Project Roadmap
+## 项目计划与进度
 
-| Phase | Module | Status | Description |
-|-------|--------|--------|-------------|
-| Phase 1 | Core Framework | ✅ Done | LLM client, shell executor, database, config system |
-| Phase 1 | Recon Agent | ✅ Done | Subdomain enum, HTTP fingerprint, port scan, info leak, JS analysis, WAF detection |
-| Phase 2 | Scanner Agent | ✅ Done | SQLi/XSS/SSRF/IDOR/Redirect/Traversal/CMDi + GraphQL/JWT/CORS/Headers |
-| Phase 2 | Report Agent | ✅ Done | LLM-generated SRC reports (Markdown/HTML/JSON) with PoC & remediation |
-| Phase 2 | Docker Deploy | ✅ Done | Dockerfile + docker-compose + test lab environment |
-| Phase 3 | Orchestrator | ✅ Done | `cyberagent auto` — full pipeline: recon → scan → report |
-| Phase 3 | Enhanced Scanning | ✅ Done | GraphQL injection, JWT attacks, CORS, security headers, auth bypass |
-| Phase 4 | Real SRC Testing | 🔲 Planned | Test against live bug bounty programs |
-| Phase 4 | Web UI Dashboard | 🔲 Planned | Visual dashboard, task management, report viewer |
-| Phase 5 | Advanced Modules | 🔲 Planned | XXE, SSTI, deserialization, race conditions, subdomain takeover |
+| 阶段 | 模块 | 状态 | 说明 |
+|------|------|------|------|
+| Phase 1 | 核心框架 | ✅ 完成 | LLM客户端、Shell执行器、数据库、配置系统 |
+| Phase 1 | 侦察 Agent | ✅ 完成 | 子域名枚举、HTTP指纹、端口扫描、信息泄露、JS分析、WAF检测 |
+| Phase 2 | 扫描 Agent | ✅ 完成 | 23个工具：SQLi/XSS/SSRF/IDOR/GraphQL/JWT/CORS/SSTI/NoSQL/XXE/RCE/LFI/暴力破解/表单测试等 |
+| Phase 2 | 报告 Agent | ✅ 完成 | LLM生成SRC格式报告（Markdown/HTML/JSON），含PoC和修复建议 |
+| Phase 2 | Docker 部署 | ✅ 完成 | Dockerfile + docker-compose + 靶场环境 |
+| Phase 3 | 编排器 | ✅ 完成 | `auto`固定流水线 + `agent`自主循环 + `team`团队协作 |
+| Phase 3 | Coordinator Agent | ✅ 完成 | 总指挥：HR分析 + PM调度 + 并行专项测试 |
+| Phase 3 | 知识积累闭环 | ✅ 完成 | Dream复盘 + 知识库持久化 + 策略迭代 |
+| Phase 3 | 独立审查 | ✅ 完成 | Reviewer Agent + 辩论机制（裁判分离） |
+| Phase 4 | 真实SRC实战 | 🔲 计划中 | 对接公开SRC项目进行实战测试 |
+| Phase 4 | Web UI | 🔲 计划中 | 可视化Dashboard，任务管理，报告查看 |
 
-## Architecture
+## 架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      CyberAgent CLI                         │
-│              auto / recon / scan / report                    │
+│              CyberAgent CLI（4种运行模式）                    │
+│   auto（固定流水线）/ agent（自主循环）/ team（团队协作）      │
 └───────┬──────────────┬──────────────┬───────────────────────┘
         │              │              │
  ┌──────▼──────┐ ┌─────▼──────┐ ┌────▼───────┐
- │  Recon Agent │ │ Scan Agent │ │  Reporter  │
+ │  侦察Agent   │ │  扫描Agent  │ │  报告Agent  │
+ │  (Recon)     │ │  (Scanner) │ │  (Reporter) │
  └─────────────┘ └────────────┘ └────────────┘
- ├─ Subdomain      ├─ SQLi          ├─ Markdown/HTML/JSON
- ├─ HTTP Fingerprint├─ XSS          ├─ PoC Generation
- ├─ Port Scan      ├─ SSRF          ├─ CVSS Scoring
- ├─ Info Leak      ├─ IDOR          ├─ Remediation
- ├─ JS Analysis    ├─ Open Redirect ├─ Risk Assessment
- ├─ WAF Detection  ├─ Dir Traversal └─ Executive Summary
- └─ LLM Analysis   ├─ CMD Injection
-                    ├─ GraphQL
-                    ├─ JWT Attacks
-                    ├─ CORS Check
-                    ├─ Security Headers
-                    └─ Auth Bypass
+ ├─ 子域名枚举    ├─ 23个安全工具  ├─ Markdown/HTML/JSON
+ ├─ HTTP指纹      ├─ Web爬虫+表单  ├─ PoC代码生成
+ ├─ 端口扫描      ├─ SQLi/XSS     ├─ CVSS评分
+ ├─ 信息泄露      ├─ SSRF/IDOR    ├─ 修复建议
+ ├─ JS分析        ├─ GraphQL/JWT   └─ 风险评估
+ ├─ WAF检测       ├─ RCE/LFI
+ └─ LLM分析       ├─ 暴力破解
+                   └─ CORS/安全头
 ```
 
-## Quick Start
+## 快速开始
 
-### Prerequisites
+### 环境要求
 
 - Python 3.12+
 - DeepSeek API Key
 
-### Optional Security Tools
+### 安全工具（可选）
 
 ```bash
-# Go-based tools (ProjectDiscovery)
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-
-# System tools
 brew install nmap  # macOS
-apt install nmap   # Linux
 ```
 
-### Installation
+### 安装
 
 ```bash
 git clone https://github.com/Lniosy/cyberagent.git
@@ -72,178 +66,67 @@ cd cyberagent
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-```
-
-### Configuration
-
-```bash
 cp .env.example .env
-# Edit .env and add your DeepSeek API Key
+# 编辑 .env，填入 DeepSeek API Key
 ```
 
-### Usage
+### 使用
 
 ```bash
-# Full automated pipeline (recommended)
+# 一键全自动（推荐）
 cyberagent auto example.com
-cyberagent auto localhost --local -p 3000  # local target
 
-# Step-by-step
-cyberagent recon example.com              # 1. Reconnaissance
-cyberagent scan example.com               # 2. Vulnerability scanning
-cyberagent report example.com             # 3. Generate report
+# 自主 Agent 模式（LLM 自主决策）
+cyberagent agent example.com
 
-# Pipeline control
-cyberagent auto target.com --skip-recon   # Skip recon (use existing results)
-cyberagent auto target.com --skip-scan    # Skip scanning
-cyberagent auto target.com --skip-report  # Skip report generation
+# 团队模式（Coordinator 调度，支持并行专项测试）
+cyberagent team example.com
 
-# Database status
-cyberagent db-status
+# 分步执行
+cyberagent recon example.com
+cyberagent scan example.com
+cyberagent report example.com
+
+# 本地靶场
+cyberagent agent localhost --local -p 3000
 ```
 
 ### Docker
 
 ```bash
-# Build
 docker compose build
-
-# Run recon
 docker compose run recon example.com
-
-# Local lab testing
-docker compose -f docker-compose.test.yml up -d juice-shop
-cyberagent auto localhost --local -p 3000
 ```
 
-## Project Structure
+## 技术栈
 
-```
-cyberagent/
-├── cyberagent/
-│   ├── core/
-│   │   ├── config.py          # Configuration (.env + Pydantic)
-│   │   ├── llm_client.py      # DeepSeek API client (Pro/Flash dual model)
-│   │   ├── shell_executor.py  # Async shell command executor
-│   │   └── database.py        # SQLite database layer
-│   ├── agents/
-│   │   ├── base.py            # Agent base class (unified execution flow)
-│   │   ├── recon.py           # Recon Agent (6 subtasks)
-│   │   ├── scanner.py         # Scanner Agent (12 vulnerability modules)
-│   │   └── reporter.py        # Report Agent (multi-format output)
-│   └── cli.py                 # CLI entry point (auto/recon/scan/report)
-├── Dockerfile
-├── docker-compose.yml
-├── docker-compose.test.yml
-├── pyproject.toml
-└── README.md
-```
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| LLM Core | DeepSeek V4 Pro (reasoning) + Flash (lightweight) |
-| Language | Python 3.12+ |
-| Agent Framework | Custom (asyncio + LLM ReAct-driven) |
-| Security Tools | subfinder, httpx, nuclei, nmap |
-| Database | SQLite |
+| 组件 | 技术 |
+|------|------|
+| LLM 核心 | DeepSeek V4 Pro (推理) + Flash (轻量) |
+| 语言 | Python 3.12+ |
+| Agent 框架 | 自研（asyncio + LLM ReAct 驱动） |
+| 知识库 | hack-skills (102个SKILL.md按需加载) |
+| 安全工具 | subfinder, httpx, nuclei, nmap |
+| 数据库 | SQLite |
 | CLI | Click + Rich |
-| Deployment | Docker + docker-compose |
+| 部署 | Docker + docker-compose |
 
-## Vulnerability Detection
+## 靶场验证
 
-| Type | Method | Confidence |
-|------|--------|------------|
-| SQL Injection | Error-based / Boolean-based / Time-based | Confirmed/Probable |
-| XSS | Reflected (URL params + forms) | Confirmed |
-| SSRF | Internal network / Cloud metadata / Protocol probe | Probable |
-| IDOR | API ID enumeration + response comparison | Confirmed/Probable |
-| Open Redirect | 302 redirect verification | Confirmed |
-| Directory Traversal | /etc/passwd read | Confirmed |
-| Command Injection | Output matching / Time delay | Confirmed/Probable |
-| Template Scan | Nuclei (3000+ templates) | Probable |
-| GraphQL | Introspection / Injection / Deep query DoS | Confirmed/Probable |
-| JWT | None algorithm / Weak algorithm / Default creds | Confirmed/Probable |
-| CORS | Origin reflection / Wildcard / Null origin | Confirmed |
-| Security Headers | HSTS / CSP / X-Frame-Options / etc. | Confirmed |
+| 靶场 | 工具检出 | LLM 分析 | 耗时 | 成本 |
+|------|---------|---------|------|------|
+| OWASP Juice Shop | 14 IDOR + 6 安全头 | 10+ 漏洞 | 6轮/181s | $0.011 |
+| Pikachu | 9 (5安全头+3IDOR+1信息) | 10+ 漏洞 | 10轮/484s | $0.022 |
 
-## Lab Validation
+## 致谢
 
-Tested against OWASP Juice Shop:
-
-- **Recon**: Identified OWASP Juice Shop, Node.js, API endpoints, hardcoded passwords
-- **Scan**: Found 13 vulnerabilities (4 IDOR + 3 GraphQL + 1 CORS + 5 missing headers)
-- **Report**: Auto-generated SRC reports with CVSS scores, PoC, reproduction steps, remediation
-
-## Disclaimer
-
-> **This tool is intended for authorized security testing and educational purposes only. Unauthorized use is strictly prohibited and may violate applicable laws.**
-
-### Authorized Use
-
-1. **Authorized Penetration Testing** — With explicit written authorization from the target system owner
-2. **Bug Bounty Programs** — Within publicly disclosed program scope and rules
-3. **Security Research** — In self-built environments (CTF, DVWA, Juice Shop, HackTheBox)
-4. **Internal Auditing** — On systems owned or managed by your organization
-
-### Strictly Prohibited
-
-- Scanning or testing any system without proper authorization
-- Causing denial of service (DoS) or destructive impact
-- Exploiting vulnerabilities for data theft or malicious activities
-- Any violation of applicable laws in your jurisdiction
-- Targeting critical infrastructure without explicit authorization
-- Selling vulnerabilities to unauthorized parties
-
-### Legal Compliance
-
-Users must comply with all applicable laws, including:
-
-**International**
-- **CFAA (US)** — Computer Fraud and Abuse Act, 18 U.S.C. § 1030
-- **CMA (UK)** — Computer Misuse Act 1990
-- **Budapest Convention (EU)** — Convention on Cybercrime
-- **GDPR (EU)** — General Data Protection Regulation
-
-**China**
-- 网络安全法 / 刑法§285 / 数据安全法 / 个人信息保护法
-
-**Other**
-- Japan — 不正アクセス行為の禁止等に関する法律
-- Singapore — Computer Misuse Act (Cap. 50A)
-- Australia — Criminal Code Act 1995, Part 10.7
-- Germany — StGB § 202a-c
-- India — IT Act 2000, Sections 43 & 66
-- Brazil — LGPD & Lei de Crimes Informáticos
-
-### Limitation of Liability
-
-- Provided **"AS IS"** without warranty of any kind
-- Authors not liable for any direct or indirect damages
-- **Users assume full legal responsibility** for their actions
-- Use constitutes acceptance of this disclaimer
-
-### Responsible Disclosure
-
-- Report through official channels (SRC, HackerOne, Bugcrowd, vendor PSIRT)
-- Do not publicly disclose unpatched vulnerabilities
-- Allow reasonable remediation time
-- Follow coordinated vulnerability disclosure (CVD) practices
-
----
-
-**By using this tool, you acknowledge that you have read, understood, and agreed to this disclaimer.**
-
-## Acknowledgments
-
-This project is inspired by and grateful to the following open-source projects:
-
-- [**pi**](https://github.com/earendil-works/pi) by [earendil-works](https://github.com/earendil-works) — AI agent framework architecture and multi-agent orchestration design patterns
-- [**hack-skills**](https://github.com/yaklang/hack-skills) by [yaklang](https://github.com/yaklang) — Comprehensive security testing knowledge base with 90+ vulnerability testing techniques and methodologies
-
-We also thank the following tools and communities:
-
+- [**pi**](https://github.com/earendil-works/pi) — AI Agent 框架架构和多智能体编排
+- [**hack-skills**](https://github.com/yaklang/hack-skills) — 安全测试知识库
 - [ProjectDiscovery](https://github.com/projectdiscovery) — subfinder, httpx, nuclei
-- [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) — Intentionally vulnerable test target
-- [DeepSeek](https://www.deepseek.com/) — LLM API powering the AI analysis engine
+- [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) — 靶场环境
+
+## 免责声明
+
+> **本工具仅限授权安全测试和教育研究用途，严禁任何未授权使用。**
+
+详见 [README_en.md](README_en.md) 中的完整免责声明（含国际法律条款）。
