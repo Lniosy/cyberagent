@@ -21,6 +21,7 @@ from cyberagent.agents.recon import ReconAgent
 from cyberagent.agents.scanner import ScannerAgent
 from cyberagent.agents.reporter import ReportAgent
 from cyberagent.agents.vuln_intel import VulnIntelAgent
+from cyberagent.agents.reviewer import ReviewerAgent
 
 console = Console()
 
@@ -259,6 +260,48 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
             else:
                 console.print("[green]未发现漏洞[/green]")
 
+        # Phase 2.5: Reviewer 独立审查（裁判分离）
+        review_results: dict = {}
+        if not skip_scan and scan_results.get("findings"):
+            console.print("\n[bold cyan]═══ Phase 2.5: 独立审查 ═══[/bold cyan]")
+            ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm)
+            reviewer = ReviewerAgent(ctx, scan_findings=scan_results["findings"])
+            try:
+                review_results = await reviewer.run()
+                review_path = out_dir / f"review_{domain_key}.json"
+                with open(review_path, "w", encoding="utf-8") as f:
+                    json.dump(review_results, f, ensure_ascii=False, indent=2, default=str)
+
+                summary = review_results.get("summary", {})
+                console.print(
+                    f"审查完成: {summary.get('confirmed', 0)} 确认 | "
+                    f"{summary.get('false_positive', 0)} 误报 | "
+                    f"{summary.get('needs_review', 0)} 待审"
+                )
+
+                # Phase 2.6: 对分歧进行辩论
+                from cyberagent.core.debate import DebateEngine
+                debate_engine = DebateEngine(llm=llm)
+                debated = 0
+                for verdict in review_results.get("verdicts", []):
+                    if verdict.get("verdict") in ("false_positive", "needs_review"):
+                        original = verdict.get("original_finding", {})
+                        if original.get("confidence") in ("confirmed", "probable"):
+                            console.print(f"  [yellow]辩论: {original.get('title', '')}[/yellow]")
+                            debate_result = await debate_engine.debate(original, verdict)
+                            verdict["debate"] = {
+                                "final_verdict": debate_result.final_verdict,
+                                "confidence": debate_result.confidence,
+                                "reasoning": debate_result.reasoning,
+                                "rounds": debate_result.rounds,
+                            }
+                            debated += 1
+
+                if debated:
+                    console.print(f"  完成 {debated} 场辩论")
+            except Exception as e:
+                console.print(f"[yellow]审查阶段异常: {e}[/yellow]")
+
         # Phase 3: 报告
         if not skip_report:
             console.print("\n[bold magenta]═══ Phase 3: 生成报告 ═══[/bold magenta]")
@@ -274,6 +317,33 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
                 console.print("[bold]报告文件:[/bold]")
                 for fmt, path in files.items():
                     console.print(f"  {fmt}: {path}")
+
+        # Phase 3.5: Dream 复盘（经验积累）
+        if scan_results.get("findings"):
+            console.print("\n[bold blue]═══ Phase 3.5: Dream 复盘 ═══[/bold blue]")
+            from cyberagent.core.dream import DreamEngine
+            from cyberagent.core.knowledge import KnowledgeBase
+            knowledge = KnowledgeBase()
+            knowledge.connect()
+            dream = DreamEngine(knowledge=knowledge, llm=llm)
+            try:
+                tool_history = []
+                dream_result = await dream.reflect(
+                    domain=domain,
+                    session_stats={"turns": 0, "elapsed": 0, "llm_stats": llm.stats.summary()},
+                    tool_history=tool_history,
+                    findings=scan_results.get("findings", []),
+                    review_results=review_results if 'review_results' in dir() else None,
+                )
+                console.print(f"  知识更新: {dream_result.knowledge_updates} 条")
+                if dream_result.changelog:
+                    console.print("  Changelog:")
+                    for line in dream_result.changelog[:5]:
+                        console.print(f"    {line}")
+            except Exception as e:
+                console.print(f"[yellow]复盘异常: {e}[/yellow]")
+            finally:
+                knowledge.close()
 
     except KeyboardInterrupt:
         console.print("\n[yellow]用户中断，正在清理...[/yellow]")
