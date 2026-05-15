@@ -260,12 +260,30 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
             else:
                 console.print("[green]未发现漏洞[/green]")
 
-        # Phase 2.5: Reviewer 独立审查（裁判分离）
+        # Phase 2.5: Reviewer 独立审查（裁判分离 — 独立上下文）
         review_results: dict = {}
         if not skip_scan and scan_results.get("findings"):
             console.print("\n[bold cyan]═══ Phase 2.5: 独立审查 ═══[/bold cyan]")
-            ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm)
-            reviewer = ReviewerAgent(ctx, scan_findings=scan_results["findings"])
+            # 独立 LLM 客户端：Reviewer 不共享 Scanner 的 token 统计和上下文
+            reviewer_llm = LLMClient()
+            # 独立数据库写入（Reviewer 写入 review_ 前缀的 findings）
+            ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=reviewer_llm)
+
+            # 最小信息传递：只传 finding 标题+URL+类型，不传 Scanner 的推理过程
+            minimal_findings = [
+                {
+                    "vuln_type": f.get("vuln_type", ""),
+                    "title": f.get("title", ""),
+                    "url": f.get("url", ""),
+                    "parameter": f.get("parameter", ""),
+                    "payload": f.get("payload", ""),
+                    "evidence": f.get("evidence", "")[:200],
+                    "severity": f.get("severity", ""),
+                    "confidence": f.get("confidence", ""),
+                }
+                for f in scan_results["findings"]
+            ]
+            reviewer = ReviewerAgent(ctx, scan_findings=minimal_findings)
             try:
                 review_results = await reviewer.run()
                 review_path = out_dir / f"review_{domain_key}.json"
@@ -279,9 +297,10 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
                     f"{summary.get('needs_review', 0)} 待审"
                 )
 
-                # Phase 2.6: 对分歧进行辩论
+                # Phase 2.6: 对分歧进行辩论（仲裁者用独立 LLM）
                 from cyberagent.core.debate import DebateEngine
-                debate_engine = DebateEngine(llm=llm)
+                arbiter_llm = LLMClient()
+                debate_engine = DebateEngine(llm=arbiter_llm)
                 debated = 0
                 for verdict in review_results.get("verdicts", []):
                     if verdict.get("verdict") in ("false_positive", "needs_review"):
@@ -318,14 +337,15 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
                 for fmt, path in files.items():
                     console.print(f"  {fmt}: {path}")
 
-        # Phase 3.5: Dream 复盘（经验积累）
+        # Phase 3.5: Dream 复盘（独立 LLM，不共享 Scanner 上下文）
         if scan_results.get("findings"):
             console.print("\n[bold blue]═══ Phase 3.5: Dream 复盘 ═══[/bold blue]")
             from cyberagent.core.dream import DreamEngine
             from cyberagent.core.knowledge import KnowledgeBase
             knowledge = KnowledgeBase()
             knowledge.connect()
-            dream = DreamEngine(knowledge=knowledge, llm=llm)
+            dream_llm = LLMClient()
+            dream = DreamEngine(knowledge=knowledge, llm=dream_llm)
             try:
                 tool_history = []
                 dream_result = await dream.reflect(
