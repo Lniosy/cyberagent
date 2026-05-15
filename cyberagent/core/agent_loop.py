@@ -280,7 +280,7 @@ class AgentLoop:
         return messages
 
     async def _build_messages(self) -> list[dict[str, str]]:
-        """构建 LLM 消息列表（含工具定义 + 上下文压缩）"""
+        """构建 LLM 消息列表（含工具定义 + 上下文压缩 + 孤立消息清理）"""
         messages = self.session.build_context()
 
         # 上下文压缩检查
@@ -288,6 +288,9 @@ class AgentLoop:
             target = self.session.get_entries_by_role("system")
             target_name = target[0].metadata.get("target", "") if target else ""
             messages = await self.compressor.compact(messages, target=target_name)
+
+        # 安全网：清理孤立的 tool 消息（防止 400 错误）
+        messages = ContextCompressor._clean_orphaned_tools(messages)
 
         return messages
 

@@ -98,7 +98,12 @@ class ContextCompressor:
 
         从最新消息向前遍历，累加 token。记录最近的合法切割点候选，
         当累积超过 keep_recent_tokens 时返回该候选。
-        合法切割点在 user/assistant/system 消息处，永不切断 tool 消息。
+
+        合法切割点规则：
+        - 只在 user/assistant/system 消息处切割
+        - 永不切断 tool 消息
+        - 永不切断 assistant(tool_calls) → tool(result) 对
+        - 永不切断连续的 tool 结果消息组
         """
         keep_tokens = self.settings.keep_recent_tokens
         accumulated = 0
@@ -110,10 +115,24 @@ class ContextCompressor:
 
             role = messages[i].get("role", "")
 
-            # 合法切割点：user/assistant/system，且下一条不是 tool
-            if role in ("user", "assistant", "system"):
-                if not (i + 1 < len(messages) and messages[i + 1].get("role") == "tool"):
+            if role in ("user", "system"):
+                # user/system 消息始终是合法切割点
+                last_valid_cut = i
+
+            elif role == "assistant":
+                # assistant 消息：检查是否有 tool_calls
+                has_tool_calls = bool(messages[i].get("tool_calls"))
+                if has_tool_calls:
+                    # 有 tool_calls，不是合法切割点（后面必须跟 tool 结果）
+                    pass
+                elif i + 1 < len(messages) and messages[i + 1].get("role") == "tool":
+                    # 下一条是 tool（属于前一个 assistant 的 tool_calls），不是切割点
+                    pass
+                else:
+                    # 普通 assistant 消息，合法切割点
                     last_valid_cut = i
+
+            # role == "tool" 时不做任何操作（不是合法切割点）
 
             # 累积超过阈值且有合法候选
             if accumulated >= keep_tokens and last_valid_cut is not None:
@@ -142,6 +161,9 @@ class ContextCompressor:
         # 分割消息
         old_messages = messages[:cut_point]
         recent_messages = messages[cut_point:]
+
+        # 清理孤立的 tool 消息（DeepSeek 要求 tool 消息必须紧跟 assistant tool_calls）
+        recent_messages = self._clean_orphaned_tools(recent_messages)
 
         logger.info("[compaction] 压缩: 丢弃 %d 条消息, 保留最近 %d 条",
                      len(old_messages), len(recent_messages))
@@ -183,6 +205,42 @@ class ContextCompressor:
         except Exception as e:
             logger.error("[compaction] 压缩失败: %s，保留原消息", e)
             return messages
+
+    @staticmethod
+    def _clean_orphaned_tools(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+        """清理孤立的 tool 消息。
+
+        DeepSeek 要求 role='tool' 的消息必须紧跟在包含 tool_calls 的
+        assistant 消息之后。如果压缩切断了 assistant+tool_calls，对应的
+        tool 结果消息就变成孤立的，必须移除。
+        """
+        cleaned = []
+        pending_tool_count = 0  # 待消费的 tool 结果数量
+
+        for msg in messages:
+            role = msg.get("role", "")
+
+            if role == "assistant":
+                cleaned.append(msg)
+                # 计算 tool_calls 数量
+                tool_calls = msg.get("tool_calls", [])
+                pending_tool_count = len(tool_calls) if tool_calls else 0
+
+            elif role == "tool":
+                if pending_tool_count > 0:
+                    # 有待消费的 tool 结果，保留
+                    cleaned.append(msg)
+                    pending_tool_count -= 1
+                else:
+                    # 孤立的 tool 消息，跳过
+                    logger.debug("[compaction] 移除孤立 tool 消息: %s",
+                                 msg.get("content", "")[:50])
+
+            else:
+                cleaned.append(msg)
+                pending_tool_count = 0
+
+        return cleaned
 
     @staticmethod
     def _messages_to_text(messages: list[dict[str, str]]) -> str:

@@ -194,7 +194,7 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
         recon_results: dict = {}
         scan_results: dict = {}
 
-        # ---- Phase 1: 侦察 ----
+        # Phase 1: 侦察
         if not skip_recon:
             console.print("\n[bold cyan]═══ Phase 1: 侦察 ═══[/bold cyan]")
             ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm,
@@ -206,85 +206,70 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
                 json.dump(recon_results, f, ensure_ascii=False, indent=2, default=str)
             console.print(f"[green]侦察结果已保存: {recon_path}[/green]")
         else:
-        recon_path = out_dir / f"recon_{domain_key}.json"
-        if recon_path.exists():
-            with open(recon_path, "r", encoding="utf-8") as f:
-                recon_results = json.load(f)
-            console.print(f"[yellow]跳过侦察，加载已有结果: {recon_path}[/yellow]")
-        else:
-            console.print("[yellow]跳过侦察，无已有结果[/yellow]")
+            recon_path = out_dir / f"recon_{domain_key}.json"
+            if recon_path.exists():
+                with open(recon_path, "r", encoding="utf-8") as f:
+                    recon_results = json.load(f)
+                console.print(f"[yellow]跳过侦察，加载已有结果: {recon_path}[/yellow]")
+            else:
+                console.print("[yellow]跳过侦察，无已有结果[/yellow]")
 
-    # ---- Phase 1.5: 漏洞情报（CVE + PoC）----
-    vuln_intel_results: dict = {}
-    if not skip_scan and recon_results:
-        console.print("\n[bold yellow]═══ Phase 1.5: 漏洞情报 ═══[/bold yellow]")
-        ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm)
-        intel_agent = VulnIntelAgent(ctx, recon_results=recon_results)
-        try:
-            vuln_intel_results = await intel_agent.run()
-            intel_path = out_dir / f"intel_{domain_key}.json"
-            with open(intel_path, "w", encoding="utf-8") as f:
-                json.dump(vuln_intel_results, f, ensure_ascii=False, indent=2, default=str)
-            console.print(f"[green]漏洞情报已保存: {intel_path}[/green]")
+        # Phase 1.5: 漏洞情报
+        vuln_intel_results: dict = {}
+        if not skip_scan and recon_results:
+            console.print("\n[bold yellow]═══ Phase 1.5: 漏洞情报 ═══[/bold yellow]")
+            ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm)
+            intel_agent = VulnIntelAgent(ctx, recon_results=recon_results)
+            try:
+                vuln_intel_results = await intel_agent.run()
+                intel_path = out_dir / f"intel_{domain_key}.json"
+                with open(intel_path, "w", encoding="utf-8") as f:
+                    json.dump(vuln_intel_results, f, ensure_ascii=False, indent=2, default=str)
+                console.print(f"[green]漏洞情报已保存: {intel_path}[/green]")
+            except Exception as e:
+                console.print(f"[yellow]漏洞情报阶段异常: {e}[/yellow]")
 
-            total_cves = vuln_intel_results.get("total_cves", 0)
-            safe_pocs = vuln_intel_results.get("safe_pocs", 0)
-            dangerous_pocs = vuln_intel_results.get("dangerous_pocs", 0)
-            console.print(f"  CVE: {total_cves} | 安全PoC: {safe_pocs} | 危险PoC(已拦截): {dangerous_pocs}")
-        except Exception as e:
-            console.print(f"[yellow]漏洞情报阶段异常: {e}[/yellow]")
+        # Phase 2: 扫描
+        if not skip_scan:
+            console.print("\n[bold red]═══ Phase 2: 漏洞扫描 ═══[/bold red]")
+            ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm,
+                              metadata={"local_mode": local})
+            agent = ScannerAgent(ctx, recon_results=recon_results)
+            scan_results = await agent.run()
+            scan_path = out_dir / f"scan_{domain_key}.json"
+            with open(scan_path, "w", encoding="utf-8") as f:
+                json.dump(scan_results, f, ensure_ascii=False, indent=2, default=str)
+            console.print(f"[green]扫描结果已保存: {scan_path}[/green]")
+            total = scan_results.get("total_findings", 0)
+            if total > 0:
+                console.print(f"[bold red]发现 {total} 个漏洞[/bold red]")
+            else:
+                console.print("[green]未发现漏洞[/green]")
 
-    # ---- Phase 2: 扫描 ----
-    if not skip_scan:
-        console.print("\n[bold red]═══ Phase 2: 漏洞扫描 ═══[/bold red]")
-        ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm,
-                          metadata={"local_mode": local})
-        agent = ScannerAgent(ctx, recon_results=recon_results)
-        scan_results = await agent.run()
-        scan_path = out_dir / f"scan_{domain_key}.json"
-        with open(scan_path, "w", encoding="utf-8") as f:
-            json.dump(scan_results, f, ensure_ascii=False, indent=2, default=str)
-        console.print(f"[green]扫描结果已保存: {scan_path}[/green]")
-
-        # 打印扫描摘要
-        total = scan_results.get("total_findings", 0)
-        if total > 0:
-            console.print(f"[bold red]发现 {total} 个漏洞[/bold red]")
-            for finding in scan_results.get("findings", []):
-                sev = finding.get("severity", "info")
-                style = {"critical": "bold red", "high": "red", "medium": "yellow"}.get(sev, "white")
-                console.print(f"  [{style}][{sev.upper()}][/{style}] {finding.get('title', '')}")
-        else:
-            console.print("[green]未发现漏洞[/green]")
-
-    # ---- Phase 3: 报告 ----
-    if not skip_report:
-        console.print("\n[bold magenta]═══ Phase 3: 生成报告 ═══[/bold magenta]")
-        ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm)
-        agent = ReportAgent(ctx, recon_results=recon_results, scan_results=scan_results)
-        report_results = await agent.run()
-
-        files = report_results.get("files", {})
-        summary = report_results.get("summary", {})
-
-        risk = summary.get("risk_rating", "unknown")
-        risk_style = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}.get(risk, "white")
-        console.print(f"\n[{risk_style}]风险评级: {risk.upper()}[/{risk_style}]")
-
-        if files:
-            console.print("[bold]报告文件:[/bold]")
-            for fmt, path in files.items():
-                console.print(f"  {fmt}: {path}")
+        # Phase 3: 报告
+        if not skip_report:
+            console.print("\n[bold magenta]═══ Phase 3: 生成报告 ═══[/bold magenta]")
+            ctx = AgentContext(target_domain=domain, target_id=target_id, db=db, llm=llm)
+            agent = ReportAgent(ctx, recon_results=recon_results, scan_results=scan_results)
+            report_results = await agent.run()
+            files = report_results.get("files", {})
+            summary = report_results.get("summary", {})
+            risk = summary.get("risk_rating", "unknown")
+            risk_style = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue"}.get(risk, "white")
+            console.print(f"\n[{risk_style}]风险评级: {risk.upper()}[/{risk_style}]")
+            if files:
+                console.print("[bold]报告文件:[/bold]")
+                for fmt, path in files.items():
+                    console.print(f"  {fmt}: {path}")
 
     except KeyboardInterrupt:
         console.print("\n[yellow]用户中断，正在清理...[/yellow]")
     except Exception as e:
         console.print(f"\n[bold red]流水线异常: {e}[/bold red]")
-        logger.error("流水线异常", exc_info=True)
     finally:
         db.close()
 
-    # ---- 最终总结（含成本统计）----
+    # 最终总结
     cost_info = llm.stats.summary()
     total_cost = cost_info["total"]["cost_usd"]
     total_calls = cost_info["total"]["calls"]
