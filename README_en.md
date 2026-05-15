@@ -8,40 +8,77 @@ AI-driven automated vulnerability discovery agent for bug bounty programs.
 
 | Phase | Module | Status | Description |
 |-------|--------|--------|-------------|
-| Phase 1 | Core Framework | ✅ Done | LLM client, shell executor, database, config system |
-| Phase 1 | Recon Agent | ✅ Done | Subdomain enum, HTTP fingerprint, port scan, info leak, JS analysis, WAF detection |
-| Phase 2 | Scanner Agent | ✅ Done | SQLi/XSS/SSRF/IDOR/Redirect/Traversal/CMDi + GraphQL/JWT/CORS/Headers |
-| Phase 2 | Report Agent | ✅ Done | LLM-generated SRC reports (Markdown/HTML/JSON) with PoC & remediation |
-| Phase 2 | Docker Deploy | ✅ Done | Dockerfile + docker-compose + test lab environment |
-| Phase 3 | Orchestrator | ✅ Done | `cyberagent auto` — full pipeline: recon → scan → report |
-| Phase 3 | Enhanced Scanning | ✅ Done | GraphQL injection, JWT attacks, CORS, security headers, auth bypass |
+| Phase 1 | Core Framework | ✅ | LLM client, shell executor, database, config, hooks |
+| Phase 1 | Recon Agent | ✅ | Subdomain enum, HTTP fingerprint, port scan, info leak, JS analysis, WAF detection |
+| Phase 2 | Scanner Agent | ✅ | 23 tools: SQLi/XSS/SSRF/IDOR/GraphQL/JWT/CORS/SSTI/NoSQL/XXE/RCE/LFI/BruteForce/FormTest |
+| Phase 2 | Report Agent | ✅ | LLM-generated SRC reports (Markdown/HTML/JSON) with PoC & remediation |
+| Phase 2 | Docker Deploy | ✅ | Dockerfile + docker-compose + test lab |
+| Phase 3 | Orchestrator | ✅ | `auto` pipeline + `agent` ReAct loop + `team` coordination |
+| Phase 3 | Coordinator Agent | ✅ | HR analysis + PM scheduling + parallel specialist dispatch |
+| Phase 3 | Knowledge Loop | ✅ | Dream reflection + knowledge persistence + strategy iteration |
+| Phase 3 | Independent Review | ✅ | Reviewer Agent + debate mechanism (inspired by Helio) |
+| Phase 3 | Config-Driven | ✅ | Agent auto-discovery + agents.yaml + Orchestrator |
+| Phase 3 | Context Management | ✅ | JSONL session persistence + context compression + prompt cache |
 | Phase 4 | Real SRC Testing | 🔲 Planned | Test against live bug bounty programs |
-| Phase 4 | Web UI Dashboard | 🔲 Planned | Visual dashboard, task management, report viewer |
-| Phase 5 | Advanced Modules | 🔲 Planned | XXE, SSTI, deserialization, race conditions, subdomain takeover |
+| Phase 4 | Web UI | 🔲 Planned | Visual dashboard, task management, report viewer |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      CyberAgent CLI                         │
-│              auto / recon / scan / report                    │
-└───────┬──────────────┬──────────────┬───────────────────────┘
-        │              │              │
- ┌──────▼──────┐ ┌─────▼──────┐ ┌────▼───────┐
- │  Recon Agent │ │ Scan Agent │ │  Reporter  │
- └─────────────┘ └────────────┘ └────────────┘
- ├─ Subdomain      ├─ SQLi          ├─ Markdown/HTML/JSON
- ├─ HTTP Fingerprint├─ XSS          ├─ PoC Generation
- ├─ Port Scan      ├─ SSRF          ├─ CVSS Scoring
- ├─ Info Leak      ├─ IDOR          ├─ Remediation
- ├─ JS Analysis    ├─ Open Redirect ├─ Risk Assessment
- ├─ WAF Detection  ├─ Dir Traversal └─ Executive Summary
- └─ LLM Analysis   ├─ CMD Injection
-                    ├─ GraphQL
-                    ├─ JWT Attacks
-                    ├─ CORS Check
-                    ├─ Security Headers
-                    └─ Auth Bypass
+┌─────────────────────────────────────────────────────────────────┐
+│                    CyberAgent CLI (4 modes)                      │
+│  auto (pipeline) / agent (ReAct) / team (coordinator) / step    │
+└────────┬────────────────────┬─────────────────────┬─────────────┘
+         │                    │                     │
+  ┌──────▼──────┐   ┌────────▼────────┐   ┌───────▼───────┐
+  │ Coordinator │   │   Agent Loop    │   │   Pipeline    │
+  │  (HR + PM)  │   │  (ReAct mode)  │   │ (Phase 1→2→3) │
+  │  Parallel   │   │  Tool selection │   │               │
+  └──────┬──────┘   └───────┬─────────┘   └───────┬───────┘
+         └──────────────────┼─────────────────────┘
+                            │
+         ┌──────────────────┼──────────────────┐
+         │                  │                  │
+   ┌─────▼─────┐    ┌──────▼──────┐   ┌──────▼──────┐
+   │ Recon     │    │  Scanner    │   │  Reporter   │
+   │ 6 tasks   │    │ 23 tools   │   │ 3 formats  │
+   └───────────┘    └─────────────┘   └─────────────┘
+                           │
+              ┌────────────┼────────────┐
+              │            │            │
+        ┌─────▼────┐ ┌────▼────┐ ┌────▼────┐
+        │ Reviewer  │ │ Intel   │ │ Dream   │
+        │ Verify +  │ │ CVE/    │ │ Reflect │
+        │ Debate    │ │ PoC     │ │ + Learn │
+        └──────────┘ └─────────┘ └─────────┘
+```
+
+## 23 Security Tools
+
+| Category | Tools | Count |
+|----------|-------|-------|
+| Recon | subdomain_enum, port_scan, http_probe, api_enum, js_analyze, web_crawl | 6 |
+| Scan | test_sqli, test_xss, test_idor, test_graphql, test_cors, test_headers, form_test, test_rce, test_lfi, test_bruteforce, test_deserialization | 11 |
+| Intel | cve_query, poc_search | 2 |
+| Analysis | analyze_findings, get_findings_summary, load_skill | 3 |
+| Report | generate_report, complete_task | 2 |
+
+## 4 Running Modes
+
+```bash
+# 1. Fixed pipeline (simple, reliable)
+cyberagent auto example.com
+
+# 2. Autonomous agent (LLM decides, ReAct loop)
+cyberagent agent example.com
+
+# 3. Team mode (Coordinator dispatches, parallel specialists)
+cyberagent team example.com
+
+# 4. Step-by-step (manual control)
+cyberagent recon example.com
+cyberagent scan example.com
+cyberagent report example.com
 ```
 
 ## Quick Start
@@ -54,14 +91,10 @@ AI-driven automated vulnerability discovery agent for bug bounty programs.
 ### Optional Security Tools
 
 ```bash
-# Go-based tools (ProjectDiscovery)
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-
-# System tools
 brew install nmap  # macOS
-apt install nmap   # Linux
 ```
 
 ### Installation
@@ -72,71 +105,15 @@ cd cyberagent
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-```
-
-### Configuration
-
-```bash
 cp .env.example .env
-# Edit .env and add your DeepSeek API Key
-```
-
-### Usage
-
-```bash
-# Full automated pipeline (recommended)
-cyberagent auto example.com
-cyberagent auto localhost --local -p 3000  # local target
-
-# Step-by-step
-cyberagent recon example.com              # 1. Reconnaissance
-cyberagent scan example.com               # 2. Vulnerability scanning
-cyberagent report example.com             # 3. Generate report
-
-# Pipeline control
-cyberagent auto target.com --skip-recon   # Skip recon (use existing results)
-cyberagent auto target.com --skip-scan    # Skip scanning
-cyberagent auto target.com --skip-report  # Skip report generation
-
-# Database status
-cyberagent db-status
+# Edit .env with your DeepSeek API Key
 ```
 
 ### Docker
 
 ```bash
-# Build
 docker compose build
-
-# Run recon
 docker compose run recon example.com
-
-# Local lab testing
-docker compose -f docker-compose.test.yml up -d juice-shop
-cyberagent auto localhost --local -p 3000
-```
-
-## Project Structure
-
-```
-cyberagent/
-├── cyberagent/
-│   ├── core/
-│   │   ├── config.py          # Configuration (.env + Pydantic)
-│   │   ├── llm_client.py      # DeepSeek API client (Pro/Flash dual model)
-│   │   ├── shell_executor.py  # Async shell command executor
-│   │   └── database.py        # SQLite database layer
-│   ├── agents/
-│   │   ├── base.py            # Agent base class (unified execution flow)
-│   │   ├── recon.py           # Recon Agent (6 subtasks)
-│   │   ├── scanner.py         # Scanner Agent (12 vulnerability modules)
-│   │   └── reporter.py        # Report Agent (multi-format output)
-│   └── cli.py                 # CLI entry point (auto/recon/scan/report)
-├── Dockerfile
-├── docker-compose.yml
-├── docker-compose.test.yml
-├── pyproject.toml
-└── README.md
 ```
 
 ## Tech Stack
@@ -146,35 +123,26 @@ cyberagent/
 | LLM Core | DeepSeek V4 Pro (reasoning) + Flash (lightweight) |
 | Language | Python 3.12+ |
 | Agent Framework | Custom (asyncio + LLM ReAct-driven) |
+| Knowledge Base | hack-skills (102 SKILL.md, on-demand loading) |
 | Security Tools | subfinder, httpx, nuclei, nmap |
 | Database | SQLite |
 | CLI | Click + Rich |
 | Deployment | Docker + docker-compose |
 
-## Vulnerability Detection
-
-| Type | Method | Confidence |
-|------|--------|------------|
-| SQL Injection | Error-based / Boolean-based / Time-based | Confirmed/Probable |
-| XSS | Reflected (URL params + forms) | Confirmed |
-| SSRF | Internal network / Cloud metadata / Protocol probe | Probable |
-| IDOR | API ID enumeration + response comparison | Confirmed/Probable |
-| Open Redirect | 302 redirect verification | Confirmed |
-| Directory Traversal | /etc/passwd read | Confirmed |
-| Command Injection | Output matching / Time delay | Confirmed/Probable |
-| Template Scan | Nuclei (3000+ templates) | Probable |
-| GraphQL | Introspection / Injection / Deep query DoS | Confirmed/Probable |
-| JWT | None algorithm / Weak algorithm / Default creds | Confirmed/Probable |
-| CORS | Origin reflection / Wildcard / Null origin | Confirmed |
-| Security Headers | HSTS / CSP / X-Frame-Options / etc. | Confirmed |
-
 ## Lab Validation
 
-Tested against OWASP Juice Shop:
+| Target | Tool Findings | LLM Analysis | Time | Cost |
+|--------|--------------|--------------|------|------|
+| OWASP Juice Shop | 14 IDOR + 6 headers | 10+ vulns | 6 turns/181s | $0.011 |
+| Pikachu | 9 (5 headers + 3 IDOR + 1 info) | 10+ vulns | 10 turns/484s | $0.022 |
 
-- **Recon**: Identified OWASP Juice Shop, Node.js, API endpoints, hardcoded passwords
-- **Scan**: Found 13 vulnerabilities (4 IDOR + 3 GraphQL + 1 CORS + 5 missing headers)
-- **Report**: Auto-generated SRC reports with CVSS scores, PoC, reproduction steps, remediation
+## Acknowledgments
+
+- [**pi**](https://github.com/earendil-works/pi) — AI agent framework architecture and multi-agent orchestration design
+- [**hack-skills**](https://github.com/yaklang/hack-skills) — Security testing knowledge base (102 SKILL.md)
+- [ProjectDiscovery](https://github.com/projectdiscovery) — subfinder, httpx, nuclei
+- [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) — Test lab
+- [Pikachu](https://github.com/zhuifengshaonianhanlu/pikachu) — Test lab
 
 ## Disclaimer
 
@@ -234,16 +202,3 @@ Users must comply with all applicable laws, including:
 ---
 
 **By using this tool, you acknowledge that you have read, understood, and agreed to this disclaimer.**
-
-## Acknowledgments
-
-This project is inspired by and grateful to the following open-source projects:
-
-- [**pi**](https://github.com/earendil-works/pi) by [earendil-works](https://github.com/earendil-works) — AI agent framework architecture and multi-agent orchestration design patterns
-- [**hack-skills**](https://github.com/yaklang/hack-skills) by [yaklang](https://github.com/yaklang) — Comprehensive security testing knowledge base with 90+ vulnerability testing techniques and methodologies
-
-We also thank the following tools and communities:
-
-- [ProjectDiscovery](https://github.com/projectdiscovery) — subfinder, httpx, nuclei
-- [OWASP Juice Shop](https://github.com/juice-shop/juice-shop) — Intentionally vulnerable test target
-- [DeepSeek](https://www.deepseek.com/) — LLM API powering the AI analysis engine
