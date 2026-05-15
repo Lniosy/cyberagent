@@ -51,7 +51,7 @@ AGENT_SYSTEM_PROMPT = """你是一个专业的网络安全自动化渗透测试 
 3. **不重复相同操作**：同一个工具对同一个目标只调用一次
 4. **不放弃任务**：失败时换工具或换目标，不要停下来
 5. **已知端口直接用**：初始上下文有端口信息就直接探测，不扫描全端口
-6. **完成标准**：测试了至少 3 种漏洞类型后，调用 generate_report 和 complete_task
+6. **完成标准**：测试了至少 3 种漏洞类型后，系统会提示你调用 generate_report 和 complete_task，收到提示后立即执行
 
 ## 安全红线（不可违反）
 - 只用 GET/HEAD/OPTIONS 和受控 POST
@@ -138,7 +138,11 @@ class AgentLoop:
         """
         self._start_time = time.time()
         self._turn_count = 0
+        self._target = target  # 保存目标域名供后续使用
         self._recent_tools: list[str] = []  # 最近调用的工具名（卡住检测用）
+        self._tested_pairs: set[str] = set()  # 已测试的 (tool:url) 去重
+        self._tested_vuln_types: set[str] = set()  # 已测试的漏洞类型
+        self._report_generated: bool = False  # 报告是否已生成
 
         # 注入系统 prompt
         self.session.append(
@@ -203,6 +207,27 @@ class AgentLoop:
                 else:
                     # 无工具调用，本轮结束
                     has_more_tools = False
+
+                # 8. 自动完成检查
+                if self._report_generated and not self._task_complete:
+                    # 报告已生成，自动标记任务完成
+                    self._task_complete = True
+                    self.session.append(
+                        role="system",
+                        content="[系统提示] 报告已生成，任务完成。",
+                    )
+                    logger.info("[loop] 报告已生成，自动完成任务")
+                elif len(self._tested_vuln_types) >= 3 and not self._task_complete:
+                    # 测试了 3+ 种漏洞，注入报告指令
+                    vuln_list = ", ".join(sorted(self._tested_vuln_types))
+                    self.session.append(
+                        role="system",
+                        content=f"[系统提示] 你已测试 {len(self._tested_vuln_types)} 种漏洞类型: {vuln_list}。"
+                                f"请立即调用 generate_report(target='{self._target}') 生成报告。"
+                                f"不要再执行新的测试。",
+                    )
+                    logger.info("[loop] 已测试 %d 种漏洞类型，注入报告指令",
+                                len(self._tested_vuln_types))
 
                 self._turn_count += 1
 
@@ -368,11 +393,24 @@ class AgentLoop:
         # 分离内置工具和注册工具
         builtin_calls = []
         registry_calls = []
+        skipped = []
         for name, args in calls:
             if name == "load_skill":
                 builtin_calls.append((name, args))
             else:
+                # 去重：相同工具 + 相同目标 URL 不重复调用
+                dedup_key = f"{name}:{args.get('url', '')}{args.get('endpoint', '')}{args.get('base_url', '')}{args.get('host', '')}"
+                if dedup_key in self._tested_pairs:
+                    skipped.append(name)
+                    continue
+                self._tested_pairs.add(dedup_key)
+                # 记录已测试的漏洞类型
+                if name.startswith("test_"):
+                    self._tested_vuln_types.add(name.replace("test_", ""))
                 registry_calls.append((name, args))
+
+        if skipped:
+            logger.info("[loop] 跳过重复调用: %s", ", ".join(set(skipped)))
 
         # 执行内置工具（load_skill）
         for name, args in builtin_calls:
@@ -406,6 +444,9 @@ class AgentLoop:
             if result.terminate:
                 self._task_complete = True
                 break
+            # 标记报告已生成
+            if name == "generate_report" and not result.is_error:
+                self._report_generated = True
 
         # 检查 complete_task 调用
         for name, _ in calls:
