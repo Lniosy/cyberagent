@@ -136,6 +136,19 @@ class ToolRegistry:
                 modified = await hook(tool, args)
                 if modified is not None:
                     args.update(modified)
+            except PermissionError as e:
+                logger.error("[tools] beforeHook 阻断工具 %s: %s", tool_name, e)
+                result = ToolResult(
+                    content=str(e),
+                    is_error=True,
+                    metadata={
+                        "elapsed": round(time.time() - start_time, 2),
+                        "tool": tool_name,
+                        "blocked": True,
+                    },
+                )
+                await self._run_after_hooks(tool, result)
+                return result
             except Exception as e:
                 logger.warning("[tools] beforeHook 异常: %s", e)
 
@@ -158,6 +171,12 @@ class ToolRegistry:
             )
 
         # afterToolCall 钩子（可修改结果）
+        await self._run_after_hooks(tool, result)
+
+        return result
+
+    async def _run_after_hooks(self, tool: ToolDefinition, result: ToolResult) -> None:
+        """执行 afterToolCall 钩子（可修改结果）"""
         for hook in self._after_hooks:
             try:
                 modified = await hook(tool, result.to_dict())
@@ -170,8 +189,6 @@ class ToolRegistry:
                         result.terminate = modified["terminate"]
             except Exception as e:
                 logger.warning("[tools] afterHook 异常: %s", e)
-
-        return result
 
     # ---- 批量执行 ----
 

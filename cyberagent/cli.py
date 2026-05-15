@@ -37,21 +37,39 @@ def setup_logging(level: str = "INFO"):
     )
 
 
+class NaturalLanguageGroup(click.Group):
+    """优先识别已注册子命令，否则回退到自然语言模式。"""
+
+    def invoke(self, ctx):
+        if ctx._protected_args and not self.chain:
+            args = [*ctx._protected_args, *ctx.args]
+            if args and args[0] not in self.commands:
+                ctx.args = args
+                ctx._protected_args = []
+                ctx.invoked_subcommand = None
+                with ctx:
+                    return click.Command.invoke(self, ctx)
+        return super().invoke(ctx)
+
+
 # ============================================================
 # 自然语言入口 — 用户描述目标，Agent 自主完成
 # ============================================================
 
-@click.group(invoke_without_command=True)
+@click.group(
+    cls=NaturalLanguageGroup,
+    invoke_without_command=True,
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
 @click.pass_context
-@click.argument("target", required=False)
 @click.option("--max-turns", default=15, help="最大轮次")
 @click.option("--max-time", default=600, help="最大运行时间（秒）")
 @click.option("--resume", is_flag=True, help="断点续扫")
-def main(ctx, target: str | None, max_turns: int, max_time: int, resume: bool):
+def main(ctx, max_turns: int, max_time: int, resume: bool):
     """CyberAgent — AI驱动的自动化漏洞挖掘
 
     用法：
-      cyberagent                     # 启动交互式 TUI（推荐）
+      cyberagent                     # 显示帮助
       cyberagent <目标描述>           # 自然语言模式
       cyberagent agent <目标>         # 自主Agent模式
       cyberagent team <目标>          # 团队协作模式
@@ -60,11 +78,9 @@ def main(ctx, target: str | None, max_turns: int, max_time: int, resume: bool):
     """
     if ctx.invoked_subcommand is not None:
         return
+    target = " ".join(ctx.args).strip() or None
     if target is None:
-        # 无参数时启动 TUI 交互模式
-        from cyberagent.tui import run_tui
-        setup_logging()
-        run_tui()
+        click.echo(ctx.get_help())
         return
 
     setup_logging()
@@ -84,7 +100,7 @@ async def _run_natural_language(description: str, max_turns: int, max_time: int,
 
     console.print(Panel(
         f"[bold cyan]CyberAgent[/bold cyan]\n"
-        f"目标: [bold]{Description}[/bold]",
+        f"目标: [bold]{description}[/bold]",
         title="启动",
     ))
 
@@ -95,7 +111,7 @@ async def _run_natural_language(description: str, max_turns: int, max_time: int,
 
     # LLM 解析目标
     llm = LLMClient()
-    target_info = await _parse_target(llm, Description)
+    target_info = await _parse_target(llm, description)
     domain = target_info["domain"]
     local = target_info.get("local", False)
     extra_ports = target_info.get("ports", [])
@@ -131,7 +147,7 @@ async def _run_natural_language(description: str, max_turns: int, max_time: int,
     initial_ctx = f"目标: {domain}\n"
     if local:
         initial_ctx += f"本地模式，已知端口: {extra_ports}\n"
-        initial_ctx += f"请直接使用 http://{domain}:{extra_ports[0]} 作为探测目标。\n"
+        initial_ctx += _build_local_target_hint(domain, extra_ports)
     initial_ctx += f"已注册 {len(registry.get_all())} 个安全工具。\n"
     initial_ctx += f"Skill 知识库: {len(skill_loader.available_skills)} 个可用。\n"
     initial_ctx += pool.to_context_string()
@@ -191,6 +207,13 @@ async def _parse_target(llm: LLMClient, description: str) -> dict:
         domain = re.sub(r'https?://', '', desc.split()[0] if desc.split() else desc)
         domain = domain.split(':')[0].split('/')[0].strip()
         return {"domain": domain or "localhost", "local": local, "ports": ports}
+
+
+def _build_local_target_hint(domain: str, ports: list[int]) -> str:
+    """构建本地目标提示，避免未传端口时访问空列表。"""
+    if ports:
+        return f"请直接使用 http://{domain}:{ports[0]} 作为探测目标。\n"
+    return f"未指定端口，请先探测 {domain} 上开放的本地服务端口，再继续访问验证。\n"
 
 
 # ============================================================
@@ -345,7 +368,7 @@ async def _run_agent(domain: str, max_turns: int, max_time: int,
 
     initial_ctx = f"目标: {domain}\n"
     if local:
-        initial_ctx += f"本地模式，已知端口: {extra_ports}\n请直接使用 http://{domain}:{extra_ports[0]} 作为探测目标。\n"
+        initial_ctx += f"本地模式，已知端口: {extra_ports}\n{_build_local_target_hint(domain, extra_ports)}"
     initial_ctx += f"已注册 {len(registry.get_all())} 个安全工具。\n{pool.to_context_string()}"
 
     try:

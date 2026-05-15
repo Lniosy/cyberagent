@@ -108,7 +108,7 @@ class WebCrawler:
 
         self._visited.add(url)
 
-        r = await run_command(f"curl -sL -m 10 '{url}'", timeout=15)
+        r = await run_command(["curl", "-sL", "-m", "10", url], timeout=15)
         if not r.success:
             return
 

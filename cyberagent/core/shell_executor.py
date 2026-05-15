@@ -26,6 +26,7 @@ _BLOCKED_SHELL_INJECTION = re.compile(
     r'rm|chmod|chown|kill|pkill|killall|nohup|setsid)\b',
     re.IGNORECASE,
 )
+_SHELL_CONTROL_TOKENS = {"|", "||", "&&", ";", ">", ">>", "<", "<<"}
 
 
 @dataclass
@@ -51,10 +52,15 @@ async def run_command(
     cwd: str | None = None,
 ) -> ShellResult:
     """执行单个命令，返回结果。使用进程组管理防止僵尸进程。"""
-    if isinstance(cmd, list):
-        cmd_str = " ".join(shlex.quote(c) for c in cmd)
-    else:
-        cmd_str = cmd
+    try:
+        argv, cmd_str = _normalize_command(cmd)
+    except ValueError as e:
+        return ShellResult(
+            command=str(cmd),
+            returncode=-1,
+            stdout="",
+            stderr=str(e),
+        )
 
     logger.info("执行命令: %s (timeout=%ds)", cmd_str, timeout)
 
@@ -72,8 +78,8 @@ async def run_command(
         timeout = 300
 
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd_str,
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
@@ -108,6 +114,27 @@ async def run_command(
             stdout="",
             stderr=str(e),
         )
+
+
+def _normalize_command(cmd: str | list[str]) -> tuple[list[str], str]:
+    """将命令归一化为 argv，禁止字符串命令中的 shell 控制符。"""
+    if isinstance(cmd, str):
+        try:
+            argv = shlex.split(cmd, posix=True)
+        except ValueError as e:
+            raise ValueError(f"命令解析失败: {e}") from e
+        cmd_str = cmd
+    else:
+        argv = [str(part) for part in cmd]
+        cmd_str = " ".join(shlex.quote(part) for part in argv)
+
+    if not argv:
+        raise ValueError("命令不能为空")
+
+    if isinstance(cmd, str) and any(token in _SHELL_CONTROL_TOKENS for token in argv):
+        raise ValueError("字符串命令不支持 shell 控制符，请改为参数列表调用")
+
+    return argv, cmd_str
 
 
 def _kill_process_group(proc: asyncio.subprocess.Process) -> None:

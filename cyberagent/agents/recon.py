@@ -405,10 +405,10 @@ class ReconAgent(BaseAgent):
         # 第一步：先获取一个基线响应（用于识别 SPA catch-all）
         baseline_url = targets[0].rstrip("/")
         baseline_resp = await run_command(
-            f"curl -sL -m 5 '{baseline_url}/__definitely_not_exist_12345__' | head -c 1000",
+            ["curl", "-sL", "-m", "5", f"{baseline_url}/__definitely_not_exist_12345__"],
             timeout=10,
         )
-        baseline_body = baseline_resp.stdout if baseline_resp.success else ""
+        baseline_body = baseline_resp.stdout[:1000] if baseline_resp.success else ""
         is_spa = "<!doctype html>" in baseline_body.lower()[:100] or "<html" in baseline_body.lower()[:100]
         baseline_len = len(baseline_body.strip())
         logger.info("[recon] SPA 检测: %s (基线响应长度: %d)", "是" if is_spa else "否", baseline_len)
@@ -444,11 +444,16 @@ class ReconAgent(BaseAgent):
             # 301/302 跳转需要检查跳转目标
             if code in ("301", "302"):
                 redirect_check = await run_command(
-                    f"curl -sI -m 5 '{url}' | grep -i '^location:'",
+                    ["curl", "-sI", "-m", "5", url],
                     timeout=10,
                 )
                 if redirect_check.success and redirect_check.stdout.strip():
-                    redirect_target = redirect_check.stdout.strip().split(":", 1)[1].strip()
+                    redirect_line = next(
+                        (line for line in redirect_check.stdout.splitlines()
+                         if line.lower().startswith("location:")),
+                        "",
+                    )
+                    redirect_target = redirect_line.split(":", 1)[1].strip() if redirect_line else ""
                     # 如果跳转到根路径，大概率是 SPA
                     if redirect_target in ("/", "/#/", "/#/login"):
                         continue
@@ -456,10 +461,10 @@ class ReconAgent(BaseAgent):
             # 200 响应做内容验证
             if code == "200":
                 body_check = await run_command(
-                    f"curl -sL -m 5 '{url}' | head -c 1500",
+                    ["curl", "-sL", "-m", "5", url],
                     timeout=10,
                 )
-                body = body_check.stdout if body_check.success else ""
+                body = body_check.stdout[:1500] if body_check.success else ""
                 body_lower = body.lower()
 
                 # 检查1：如果基线是 SPA，对比响应长度

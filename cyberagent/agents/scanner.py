@@ -498,7 +498,14 @@ class ScannerAgent(BaseAgent):
         for url in urls[:3]:
             logger.info("[scanner] Nuclei 扫描: %s", url)
             result = await run_command(
-                f"echo '{url}' | {nuclei_bin} -silent -severity medium,high,critical -json -timeout 10",
+                [
+                    nuclei_bin,
+                    "-u", url,
+                    "-silent",
+                    "-severity", "medium,high,critical",
+                    "-json",
+                    "-timeout", "10",
+                ],
                 timeout=180,
             )
             if result.success:
