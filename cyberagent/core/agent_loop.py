@@ -52,7 +52,7 @@ AGENT_SYSTEM_PROMPT = """你是一个专业的网络安全自动化渗透测试 
 4. **不重复相同操作**：同一个工具对同一个目标只调用一次
 5. **不放弃任务**：失败时换工具或换目标，不要停下来
 6. **已知端口直接用**：初始上下文有端口信息就直接探测，不扫描全端口
-7. **完成标准**：测试了至少 3 种漏洞类型后，系统会提示你调用 generate_report 和 complete_task，收到提示后立即执行
+7. **完成标准**：测试了至少 5 种漏洞类型后，系统会提示你调用 generate_report 和 complete_task
 
 ## 安全红线（不可违反）
 - 只用 GET/HEAD/OPTIONS 和受控 POST
@@ -234,6 +234,7 @@ class AgentLoop:
                     has_more_tools = False
 
                 # 8. 自动完成检查
+                min_vuln_types = 5  # 至少测试 5 种漏洞类型才触发完成
                 if self._report_generated and not self._task_complete:
                     # 报告已生成，自动标记任务完成
                     self._task_complete = True
@@ -242,7 +243,7 @@ class AgentLoop:
                         content="[系统提示] 报告已生成，任务完成。",
                     )
                     logger.info("[loop] 报告已生成，自动完成任务")
-                elif len(self._tested_vuln_types) >= 3 and not self._task_complete:
+                elif len(self._tested_vuln_types) >= min_vuln_types and not self._task_complete:
                     # 测试了 3+ 种漏洞，注入报告指令
                     vuln_list = ", ".join(sorted(self._tested_vuln_types))
                     self.session.append(
