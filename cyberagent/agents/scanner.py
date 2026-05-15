@@ -1,6 +1,16 @@
 """扫描 Agent — 自动化漏洞检测（SQLi/XSS/SSRF/IDOR 等）"""
 from __future__ import annotations
 
+MANIFEST = {
+    "name": "scanner",
+    "display_name": "扫描 Agent",
+    "description": "18种漏洞检测：SQLi/XSS/SSRF/IDOR/GraphQL/JWT/CORS/SSTI/NoSQL/XXE等",
+    "category": "scan",
+    "phase": 2,
+    "input_requires": [],
+    "output_provides": ["scan_results", "scan_findings"],
+}
+
 import asyncio
 import json
 import logging
@@ -1911,3 +1921,5 @@ class ScannerAgent(BaseAgent):
             return await self.ctx.llm.chat_json_pro(prompt)
         except Exception:
             return {"summary": f"发现 {len(self.findings)} 个漏洞", "risk_level": "high"}
+# Auto-discovery reference
+AGENT_CLASS = ScannerAgent

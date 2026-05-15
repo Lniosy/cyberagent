@@ -14,6 +14,16 @@
 """
 from __future__ import annotations
 
+MANIFEST = {
+    "name": "reviewer",
+    "display_name": "审查 Agent",
+    "description": "独立验证漏洞发现，裁判与运动员分离，支持辩论机制",
+    "category": "review",
+    "phase": 2.5,
+    "input_requires": [],
+    "output_provides": ["review_results"],
+}
+
 import json
 import logging
 import re
@@ -347,3 +357,5 @@ class ReviewerAgent(BaseAgent):
                 "evidence_against": reproduction.get("evidence", ""),
                 "reasoning": "独立复现失败，无法确认（LLM 判定失败）",
             }
+# Auto-discovery reference
+AGENT_CLASS = ReviewerAgent

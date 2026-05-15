@@ -1,6 +1,17 @@
 """侦察 Agent — 自动化子域名枚举、端口扫描、指纹识别等"""
 from __future__ import annotations
 
+# Agent 自描述清单（= Helio 的 JD）
+MANIFEST = {
+    "name": "recon",
+    "display_name": "侦察 Agent",
+    "description": "子域名枚举、端口扫描、HTTP指纹、JS分析、WAF检测、信息泄露",
+    "category": "recon",
+    "phase": 1,
+    "input_requires": [],
+    "output_provides": ["recon_results"],
+}
+
 import asyncio
 import json
 import logging
@@ -679,3 +690,5 @@ class ReconAgent(BaseAgent):
             )
 
         return result_info
+# Auto-discovery reference
+AGENT_CLASS = ReconAgent

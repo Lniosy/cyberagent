@@ -1,6 +1,16 @@
 """报告 Agent — 自动生成 SRC 格式漏洞报告"""
 from __future__ import annotations
 
+MANIFEST = {
+    "name": "reporter",
+    "display_name": "报告 Agent",
+    "description": "生成SRC格式漏洞报告：Markdown/HTML/JSON，含PoC和修复建议",
+    "category": "report",
+    "phase": 3,
+    "input_requires": [],
+    "output_provides": ["report_results"],
+}
+
 import json
 import logging
 from datetime import datetime
@@ -439,3 +449,5 @@ code {{ font-family: 'SF Mono', 'Fira Code', monospace; }}
 <p style="color:#9ca3af;font-size:14px;">本报告由 CyberAgent 自动生成</p>
 </body>
 </html>"""
+# Auto-discovery reference
+AGENT_CLASS = ReportAgent

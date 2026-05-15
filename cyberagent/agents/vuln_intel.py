@@ -15,6 +15,16 @@
 """
 from __future__ import annotations
 
+MANIFEST = {
+    "name": "vuln_intel",
+    "display_name": "情报 Agent",
+    "description": "CVE漏洞查询、GitHub PoC搜索、PoC安全审核、LLM辅助PoC生成",
+    "category": "intel",
+    "phase": 1.5,
+    "input_requires": [],
+    "output_provides": ["vuln_intel_results"],
+}
+
 import asyncio
 import json
 import logging

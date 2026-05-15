@@ -1,0 +1,85 @@
+# CyberAgent 配置文件 — Agent 编排
+#
+# 每个 Agent 定义：
+#   name:      唯一标识（对应 Agent 类的 manifest.name）
+#   enabled:   是否启用（true/false）
+#   phase:     执行阶段（数字越小越先执行）
+#   priority:  同 phase 内的优先级
+#   timeout:   超时秒数
+#   config:    Agent 专属配置
+#
+# 修改此文件即可增减 Agent，无需改代码。
+
+agents:
+  # Phase 1: 侦察
+  - name: recon
+    enabled: true
+    phase: 1
+    priority: 0
+    timeout: 600
+    config:
+      local_mode: false
+      extra_ports: []
+
+  # Phase 1.5: 漏洞情报
+  - name: vuln_intel
+    enabled: true
+    phase: 1.5
+    priority: 0
+    timeout: 300
+    config:
+      max_cves: 10
+      search_poc: true
+
+  # Phase 2: 漏洞扫描
+  - name: scanner
+    enabled: true
+    phase: 2
+    priority: 0
+    timeout: 600
+    config:
+      modules:
+        sqli: true
+        xss: true
+        ssrf: true
+        idor: true
+        graphql: true
+        jwt: true
+        cors: true
+        headers: true
+        ssti: true
+        nosql: true
+        xxe: true
+        upload: true
+        crlf: true
+        csrf: true
+      use_nuclei: true
+      use_dynamic_payloads: true
+
+  # Phase 2.5: 独立审查
+  - name: reviewer
+    enabled: true
+    phase: 2.5
+    priority: 0
+    timeout: 300
+    config:
+      debate_enabled: true
+      max_debate_rounds: 3
+
+  # Phase 3: 报告生成
+  - name: reporter
+    enabled: true
+    phase: 3
+    priority: 0
+    timeout: 300
+    config:
+      formats: ["markdown", "html", "json"]
+
+  # Phase 3.5: Dream 复盘
+  - name: dream
+    enabled: true
+    phase: 3.5
+    priority: 0
+    timeout: 120
+    config:
+      auto_update_knowledge: true
