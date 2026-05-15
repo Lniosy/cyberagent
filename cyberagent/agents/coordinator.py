@@ -217,60 +217,87 @@ class CoordinatorAgent:
         self._shared_context: dict[str, Any] = {}
 
     async def run(self, target: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
-        """运行 Coordinator"""
+        """运行 Coordinator — 支持并行专项测试"""
         from rich.console import Console
         console = Console()
 
         console.print(f"\n[bold cyan]═══ Coordinator Agent 启动 ═══[/bold cyan]")
         console.print(f"目标: [bold]{target}[/bold]")
 
-        # 1. HR: 分析目标，决定招募哪些 Agent
-        agents_to_recruit = await self._hr_analyze(target)
-        console.print(f"\n[bold]招募计划:[/bold] {len(agents_to_recruit)} 个 Agent")
-        for a in agents_to_recruit:
-            console.print(f"  📋 {a['name']}: {a['task']}")
-
-        # 2. PM: 按优先级排序执行
         results: dict[str, Any] = {"target": target, "agents": {}, "total_elapsed": 0}
         start_time = time.time()
 
-        for agent_plan in agents_to_recruit:
-            agent_name = agent_plan["name"]
-            task_desc = agent_plan["task"]
+        # Phase 1: 侦察（必须先执行）
+        console.print(f"\n[bold]═══ Phase 1: 侦察 ═══[/bold]")
+        self.activity.register("recon")
+        self.activity.start("recon", f"侦察 {target}")
+        await self.channel.broadcast("coordinator", f"派发侦察任务: {target}")
 
-            # 更新活动面板
-            self.activity.start(agent_name, task_desc)
-            await self.channel.broadcast("coordinator", f"派发任务给 {agent_name}: {task_desc}")
+        recon_result = await self._dispatch_agent("recon", target, f"侦察 {target}", config)
+        results["agents"]["recon"] = recon_result
 
-            # 执行 Agent
-            agent_result = await self._dispatch_agent(agent_name, target, task_desc, config)
+        if "error" in recon_result:
+            self.activity.fail("recon", recon_result["error"])
+            console.print(f"[red]侦察失败: {recon_result['error']}[/red]")
+        else:
+            self.activity.complete("recon", recon_result.get("total_findings", 0))
+            console.print(f"[green]侦察完成[/green]")
 
-            if "error" in agent_result:
-                self.activity.fail(agent_name, agent_result["error"])
-                await self.channel.broadcast("coordinator", f"{agent_name} 失败: {agent_result['error']}", "alert")
+        # Phase 2: PM 分析侦察结果，拆分为并行专项任务
+        console.print(f"\n[bold]═══ Phase 2: 并行专项测试 ═══[/bold]")
+        specialist_tasks = await self._pm_plan_parallel(target, recon_result, config)
+
+        if specialist_tasks:
+            console.print(f"[bold]PM 拆分 {len(specialist_tasks)} 个专项任务:[/bold]")
+            for t in specialist_tasks:
+                console.print(f"  🔍 {t['name']}: {t['task']}")
+
+            # 并行执行专项 Agent
+            parallel_results = await self._run_parallel(specialist_tasks, target, config, console)
+            results["agents"].update(parallel_results)
+
+        # Phase 3: PM 分析并行结果，决定是否追加测试
+        adjustment = await self._pm_post_parallel(target, results)
+        if adjustment:
+            console.print(f"\n[yellow]PM 追加测试: {adjustment.get('reason', '')}[/yellow]")
+            for extra in adjustment.get("extra_agents", []):
+                self.activity.register(extra["name"])
+                self.activity.start(extra["name"], extra["task"])
+                extra_result = await self._dispatch_agent(extra["name"], target, extra["task"], config)
+                results["agents"][extra["name"]] = extra_result
+                if "error" not in extra_result:
+                    self.activity.complete(extra["name"], extra_result.get("total_findings", 0))
+
+        # Phase 4: 审查 + 报告
+        console.print(f"\n[bold]═══ Phase 3: 审查与报告 ═══[/bold]")
+        for phase_name, agent_name in [("独立审查", "reviewer"), ("生成报告", "reporter")]:
+            reg = self.registry.get(agent_name)
+            if not reg or not reg.agent_class:
+                continue
+            self.activity.register(agent_name)
+            self.activity.start(agent_name, phase_name)
+            await self.channel.broadcast("coordinator", f"派发 {phase_name}")
+
+            phase_result = await self._dispatch_agent(agent_name, target, phase_name, config)
+            results["agents"][agent_name] = phase_result
+
+            if "error" in phase_result:
+                self.activity.fail(agent_name, phase_result["error"])
             else:
-                findings_count = agent_result.get("total_findings", 0)
-                self.activity.complete(agent_name, findings_count)
-                await self.channel.broadcast(agent_name, f"任务完成，发现 {findings_count} 个问题", "info")
-
-            results["agents"][agent_name] = agent_result
-
-            # 3. PM: 根据中间结果调整策略
-            adjustment = await self._pm_adjust(target, agent_name, agent_result, results)
-            if adjustment:
-                console.print(f"[yellow]策略调整: {adjustment.get('reason', '')}[/yellow]")
-                # 可以在 agents_to_recruit 中插入新任务
-                for new_agent in adjustment.get("extra_agents", []):
-                    if new_agent["name"] not in results["agents"]:
-                        agents_to_recruit.append(new_agent)
-                        console.print(f"  ➕ 追加: {new_agent['name']}: {new_agent['task']}")
+                self.activity.complete(agent_name, phase_result.get("total_findings", 0))
 
         results["total_elapsed"] = round(time.time() - start_time, 1)
 
-        # 4. 汇总
+        # 汇总
         console.print(f"\n{self.activity.display()}")
-        console.print(f"\n[bold green]Coordinator 完成[/bold green] — {results['total_elapsed']}s")
-        console.print(f"频道消息: {self.channel.message_count} 条")
+        total_findings = sum(
+            r.get("total_findings", 0) for r in results["agents"].values() if isinstance(r, dict)
+        )
+        console.print(f"\n[bold green]Coordinator 完成[/bold green] — "
+                       f"{results['total_elapsed']}s | "
+                       f"{len(results['agents'])} 个 Agent | "
+                       f"{total_findings} 个发现 | "
+                       f"频道消息: {self.channel.message_count}")
 
         return results
 
@@ -419,5 +446,146 @@ class CoordinatorAgent:
                         {"name": "reviewer", "task": f"独立验证 {len(high_findings)} 个高危漏洞"},
                     ],
                 }
+
+        return None
+
+    async def _pm_plan_parallel(self, target: str, recon_result: dict,
+                                 config: dict | None) -> list[dict[str, str]]:
+        """PM: 分析侦察结果，拆分为可并行执行的专项任务"""
+        if "error" in recon_result:
+            return [{"name": "scanner", "task": f"对 {target} 进行全面漏洞扫描"}]
+
+        # 提取攻击面信息
+        attack_surface = []
+        stages = recon_result.get("stages", {})
+
+        # API 端点
+        api_endpoints = []
+        for stage_data in stages.values():
+            if isinstance(stage_data, dict):
+                for item in stage_data.get("targets", []):
+                    if isinstance(item, dict) and item.get("url"):
+                        api_endpoints.append(item["url"])
+            elif isinstance(stage_data, list):
+                for item in stage_data:
+                    if isinstance(item, dict):
+                        for v in item.values():
+                            if isinstance(v, str) and "api" in v.lower():
+                                api_endpoints.append(v)
+
+        # 技术栈
+        tech_stack = []
+        analysis = recon_result.get("analysis", {})
+        for tech in analysis.get("tech_stack", []):
+            if isinstance(tech, dict):
+                tech_stack.append(tech.get("name", ""))
+            elif isinstance(tech, str):
+                tech_stack.append(tech)
+
+        # LLM 决定如何拆分
+        prompt = (
+            f"侦察结果摘要：\n"
+            f"- 目标: {target}\n"
+            f"- API 端点: {api_endpoints[:10]}\n"
+            f"- 技术栈: {tech_stack}\n"
+            f"- 攻击面: {[a.get('type', '') for a in analysis.get('attack_surface', [])]}\n\n"
+            f"请将漏洞测试拆分为可并行执行的专项任务。每个任务针对一个独立的攻击面。\n"
+            f"返回 JSON 数组: [{{\"name\": \"scanner\", \"task\": \"具体任务描述\"}}]\n"
+            f"注意：name 必须是已注册的 Agent 名称（scanner/reviewer）。"
+            f"如果攻击面足够多，可以创建多个 scanner 实例（用不同 task 描述区分）。"
+        )
+
+        try:
+            result = await self.llm.chat_json_pro(
+                prompt,
+                system_prompt=(
+                    "你是安全测试 PM。将漏洞测试拆分为可并行执行的独立任务。"
+                    "每个任务应针对不同的攻击面，互不干扰。只返回JSON数组。"
+                ),
+            )
+            if isinstance(result, list) and result:
+                for t in result:
+                    self.activity.register(t.get("name", "scanner"))
+                return result
+        except Exception as e:
+            logger.warning("[coordinator] PM 并行规划失败: %s", e)
+
+        # 默认：一个 scanner 测试所有
+        return [{"name": "scanner", "task": f"对 {target} 进行全面漏洞扫描"}]
+
+    async def _run_parallel(self, tasks: list[dict], target: str,
+                             config: dict | None, console: Any) -> dict[str, Any]:
+        """并行执行多个专项 Agent"""
+        import asyncio
+
+        console.print(f"\n[bold]🚀 并行启动 {len(tasks)} 个专项 Agent...[/bold]")
+
+        async def _run_one(task_plan: dict) -> tuple[str, dict]:
+            name = task_plan["name"]
+            task_desc = task_plan["task"]
+            self.activity.start(name, task_desc)
+            await self.channel.broadcast("coordinator", f"派发: {name} — {task_desc}")
+
+            result = await self._dispatch_agent(name, target, task_desc, config)
+
+            if "error" in result:
+                self.activity.fail(name, result["error"])
+            else:
+                self.activity.complete(name, result.get("total_findings", 0))
+
+            return name, result
+
+        # 并行执行
+        results_list = await asyncio.gather(
+            *[_run_one(t) for t in tasks],
+            return_exceptions=True,
+        )
+
+        # 收集结果
+        all_results = {}
+        for item in results_list:
+            if isinstance(item, Exception):
+                logger.error("[coordinator] 并行任务异常: %s", item)
+                continue
+            name, result = item
+            # 多个同名 agent 结果合并
+            if name in all_results:
+                existing = all_results[name]
+                if isinstance(existing, dict) and isinstance(result, dict):
+                    existing_findings = existing.get("findings", [])
+                    new_findings = result.get("findings", [])
+                    existing["findings"] = existing_findings + new_findings
+                    existing["total_findings"] = len(existing["findings"])
+            else:
+                all_results[name] = result
+
+        # 打印并行结果摘要
+        for name, result in all_results.items():
+            if "error" in result:
+                console.print(f"  ❌ {name}: {result['error']}")
+            else:
+                console.print(f"  ✅ {name}: {result.get('total_findings', 0)} 个发现")
+
+        return all_results
+
+    async def _pm_post_parallel(self, target: str, results: dict) -> dict | None:
+        """PM: 并行测试后分析结果，决定是否追加测试"""
+        all_findings = []
+        for agent_name, agent_result in results.get("agents", {}).items():
+            if isinstance(agent_result, dict):
+                all_findings.extend(agent_result.get("findings", []))
+
+        if not all_findings:
+            return None
+
+        # 检查是否有需要追加审查的高危漏洞
+        high_findings = [f for f in all_findings if f.get("severity") in ("critical", "high")]
+        if high_findings and "reviewer" not in results.get("agents", {}):
+            return {
+                "reason": f"发现 {len(high_findings)} 个高危漏洞，追加独立审查",
+                "extra_agents": [
+                    {"name": "reviewer", "task": f"独立验证 {len(high_findings)} 个高危漏洞"},
+                ],
+            }
 
         return None
