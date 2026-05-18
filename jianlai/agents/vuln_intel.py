@@ -35,8 +35,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from pathlib import Path
 
-from cyberagent.agents.base import BaseAgent
-from cyberagent.core.shell_executor import run_command, run_commands
+from jianlai.agents.base import BaseAgent
+from jianlai.core.shell_executor import run_command, run_commands
 
 logger = logging.getLogger(__name__)
 

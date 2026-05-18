@@ -19,11 +19,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from cyberagent.core.llm_client import LLMClient
+from jianlai.core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
-COORDINATOR_PROMPT = """你是 CyberAgent 的总指挥（Coordinator），负责协调一个安全测试团队。
+COORDINATOR_PROMPT = """你是「剑来」的剑阵总指挥（Coordinator），负责调度一支安全测试剑修团队。
 
 ## 你的团队
 你有以下专业 Agent 可以调度：
@@ -354,8 +354,8 @@ class CoordinatorAgent:
         agent_llm = LLMClient()
 
         # 创建 AgentContext
-        from cyberagent.agents.base import AgentContext
-        from cyberagent.core.database import Database
+        from jianlai.agents.base import AgentContext
+        from jianlai.core.database import Database
 
         # 使用共享上下文中的 db
         db = self._shared_context.get("db")

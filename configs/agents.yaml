@@ -1,4 +1,4 @@
-# CyberAgent 配置文件 — Agent 编排
+# 剑来 (Jianlai) 配置文件 — Agent 编排
 #
 # 每个 Agent 定义：
 #   name:      唯一标识（对应 Agent 类的 manifest.name）

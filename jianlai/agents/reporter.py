@@ -17,8 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from cyberagent.agents.base import BaseAgent
-from cyberagent.core.config import PROJECT_ROOT
+from jianlai.agents.base import BaseAgent
+from jianlai.core.config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +230,7 @@ class ReportAgent(BaseAgent):
 
         lines.append(f"# 安全评估报告: {domain}")
         lines.append(f"\n> 生成时间: {now}")
-        lines.append(f"> 工具: CyberAgent v0.1.0")
+        lines.append(f"> 工具: 剑来 (Jianlai) v0.1.0")
         lines.append("")
 
         # 执行摘要
@@ -353,7 +353,7 @@ class ReportAgent(BaseAgent):
         lines.append(f"- **测试时间:** {now}")
         lines.append("")
         lines.append("---")
-        lines.append("*本报告由 CyberAgent 自动生成*")
+        lines.append("*本报告由 剑来 (Jianlai) 自动生成*")
 
         return "\n".join(lines)
 
@@ -434,7 +434,7 @@ code {{ font-family: 'SF Mono', 'Fira Code', monospace; }}
 </head>
 <body>
 <h1>安全评估报告: {domain}</h1>
-<p><b>生成时间:</b> {now} | <b>工具:</b> CyberAgent v0.1.0</p>
+<p><b>生成时间:</b> {now} | <b>工具:</b> 剑来 (Jianlai) v0.1.0</p>
 
 <h2>执行摘要</h2>
 <p>{summary.get('executive_summary', '')}</p>
@@ -446,7 +446,7 @@ code {{ font-family: 'SF Mono', 'Fira Code', monospace; }}
 {findings_html}
 
 <hr>
-<p style="color:#9ca3af;font-size:14px;">本报告由 CyberAgent 自动生成</p>
+<p style="color:#9ca3af;font-size:14px;">本报告由 剑来 (Jianlai) 自动生成</p>
 </body>
 </html>"""
 # Auto-discovery reference

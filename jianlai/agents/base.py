@@ -14,8 +14,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
-from cyberagent.core.database import Database
-from cyberagent.core.llm_client import LLMClient
+from jianlai.core.database import Database
+from jianlai.core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 

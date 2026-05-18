@@ -1,56 +1,90 @@
-# CyberAgent
+# Jianlai (剑来)
 
-AI-driven automated vulnerability discovery agent for bug bounty programs.
+> **"With one sword, I can break every law."**
+> — *Jianlai* by Fenghuo Xizhuhou
+
+An AI-driven autonomous vulnerability discovery agent for bug bounty programs.
 
 [中文文档](README.md)
+
+## About the Name
+
+**Jianlai (剑来)**, literally *"the sword arrives"*, is the title of a wuxia/xianxia novel
+by Fenghuo Xizhuhou (烽火戏诸侯). The protagonist Chen Pingan grows from a poor kiln boy
+in the Lizhu Cave Heaven into a sword cultivator who "with one sword, breaks every law."
+
+The project borrows the spirit of a sword cultivator:
+
+- **"With one sword, I break every law"** — one precise exploit beats a thousand probes.
+- **"Seek nothing outside"** — vulnerabilities aren't far away; they live in every
+  ignored parameter and every line of code we silently trust.
+- **"When it cannot be done, do not. When it can, give everything."** — agents learn
+  when to push and when to fall back.
+- **"Ning Yao's sword never fears death."** — meet WAFs head-on, don't tiptoe.
+
+So: *sword cultivator draws sword, agent makes its move; one sword breaks every law,
+one thought breaks every defense.*
+
+The CLI vocabulary is re-themed to match:
+
+| Term | Meaning |
+|------|---------|
+| **出剑 (draw sword)** | Start a vulnerability hunt |
+| **入鞘 (sheathe)** | End of task, reflect |
+| **独行 (solo)** | Single-agent autonomous ReAct loop (`agent` mode) |
+| **结阵 (formation)** | Coordinator-orchestrated multi-agent (`team` mode) |
+| **章法 (rite)** | Fixed pipeline: recon → scan → report (`auto` mode) |
+| **拆招 (decompose)** | Step-by-step (recon / scan / report) |
+| **招式 (technique)** | Skill knowledge base (102 SKILL.md files) |
+| **复盘 (post-mortem)** | Dream reflection → persisted knowledge |
 
 ## Project Roadmap
 
 | Phase | Module | Status | Description |
 |-------|--------|--------|-------------|
-| Phase 1 | Core Framework | ✅ | LLM client, shell executor, database, config, hooks |
-| Phase 1 | Recon Agent | ✅ | Subdomain enum, HTTP fingerprint, port scan, info leak, JS analysis, WAF detection |
-| Phase 2 | Scanner Agent | ✅ | 23 tools: SQLi/XSS/SSRF/IDOR/GraphQL/JWT/CORS/SSTI/NoSQL/XXE/RCE/LFI/BruteForce/FormTest |
-| Phase 2 | Report Agent | ✅ | LLM-generated SRC reports (Markdown/HTML/JSON) with PoC & remediation |
-| Phase 2 | Docker Deploy | ✅ | Dockerfile + docker-compose + test lab |
-| Phase 3 | Orchestrator | ✅ | `auto` pipeline + `agent` ReAct loop + `team` coordination |
-| Phase 3 | Coordinator Agent | ✅ | HR analysis + PM scheduling + parallel specialist dispatch |
-| Phase 3 | Knowledge Loop | ✅ | Dream reflection + knowledge persistence + strategy iteration |
-| Phase 3 | Independent Review | ✅ | Reviewer Agent + debate mechanism (inspired by Helio) |
-| Phase 3 | Config-Driven | ✅ | Agent auto-discovery + agents.yaml + Orchestrator |
-| Phase 3 | Context Management | ✅ | JSONL session persistence + context compression + prompt cache |
-| Phase 4 | Real SRC Testing | 🔲 Planned | Test against live bug bounty programs |
-| Phase 4 | Web UI | 🔲 Planned | Visual dashboard, task management, report viewer |
+| Phase 1 | Core Framework | OK | LLM client, shell executor, database, config, hooks |
+| Phase 1 | Recon Agent | OK | Subdomain enum, HTTP fingerprint, port scan, info leak, JS analysis, WAF detection |
+| Phase 2 | Scanner Agent | OK | 23 tools: SQLi/XSS/SSRF/IDOR/GraphQL/JWT/CORS/SSTI/NoSQL/XXE/RCE/LFI/BruteForce/FormTest |
+| Phase 2 | Report Agent | OK | LLM-generated SRC reports (Markdown/HTML/JSON) with PoC & remediation |
+| Phase 2 | Docker Deploy | OK | Dockerfile + docker-compose + test lab |
+| Phase 3 | Orchestrator | OK | `auto` pipeline + `agent` ReAct loop + `team` coordination |
+| Phase 3 | Coordinator Agent | OK | HR analysis + PM scheduling + parallel specialist dispatch |
+| Phase 3 | Knowledge Loop | OK | Dream reflection + knowledge persistence + strategy iteration |
+| Phase 3 | Independent Review | OK | Reviewer Agent + debate mechanism (inspired by Helio) |
+| Phase 3 | Config-Driven | OK | Agent auto-discovery + agents.yaml + Orchestrator |
+| Phase 3 | Context Management | OK | JSONL session persistence + context compression + prompt cache |
+| Phase 4 | Real SRC Testing | TODO | Test against live bug bounty programs |
+| Phase 4 | Web UI | TODO | Visual dashboard, task management, report viewer |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    CyberAgent CLI (4 modes)                      │
-│  auto (pipeline) / agent (ReAct) / team (coordinator) / step    │
+│                     Jianlai CLI (4 modes)                        │
+│   章法 (auto) · 独行 (agent) · 结阵 (team) · 拆招 (recon/scan)    │
 └────────┬────────────────────┬─────────────────────┬─────────────┘
          │                    │                     │
   ┌──────▼──────┐   ┌────────▼────────┐   ┌───────▼───────┐
   │ Coordinator │   │   Agent Loop    │   │   Pipeline    │
-  │  (HR + PM)  │   │  (ReAct mode)  │   │ (Phase 1→2→3) │
-  │  Parallel   │   │  Tool selection │   │               │
+  │  (formation)│   │   (solo sword)  │   │   (rite)      │
+  │  HR + PM    │   │   ReAct loop    │   │ Phase 1→2→3   │
   └──────┬──────┘   └───────┬─────────┘   └───────┬───────┘
          └──────────────────┼─────────────────────┘
                             │
          ┌──────────────────┼──────────────────┐
          │                  │                  │
-   ┌─────▼─────┐    ┌──────▼──────┐   ┌──────▼──────┐
-   │ Recon     │    │  Scanner    │   │  Reporter   │
-   │ 6 tasks   │    │ 23 tools   │   │ 3 formats  │
-   └───────────┘    └─────────────┘   └─────────────┘
+   ┌─────▼─────┐    ┌──────▼──────┐    ┌──────▼──────┐
+   │ Recon     │    │  Scanner    │    │  Reporter   │
+   │ 6 tasks   │    │ 23 tools    │    │ 3 formats   │
+   └───────────┘    └─────────────┘    └─────────────┘
                            │
               ┌────────────┼────────────┐
               │            │            │
-        ┌─────▼────┐ ┌────▼────┐ ┌────▼────┐
-        │ Reviewer  │ │ Intel   │ │ Dream   │
-        │ Verify +  │ │ CVE/    │ │ Reflect │
-        │ Debate    │ │ PoC     │ │ + Learn │
-        └──────────┘ └─────────┘ └─────────┘
+        ┌─────▼────┐ ┌────▼────┐ ┌─────▼────┐
+        │ Reviewer │ │ Intel   │ │ Dream    │
+        │ Verify + │ │ CVE/PoC │ │ Reflect+ │
+        │ Debate   │ │ Search  │ │ Learn    │
+        └──────────┘ └─────────┘ └──────────┘
 ```
 
 ## 23 Security Tools
@@ -66,19 +100,22 @@ AI-driven automated vulnerability discovery agent for bug bounty programs.
 ## 4 Running Modes
 
 ```bash
-# 1. Fixed pipeline (simple, reliable)
-cyberagent auto example.com
+# Rite (fixed pipeline, simple and reliable)
+jianlai auto example.com
 
-# 2. Autonomous agent (LLM decides, ReAct loop)
-cyberagent agent example.com
+# Solo (LLM-driven ReAct loop)
+jianlai agent example.com
 
-# 3. Team mode (Coordinator dispatches, parallel specialists)
-cyberagent team example.com
+# Formation (Coordinator dispatches parallel specialists)
+jianlai team example.com
 
-# 4. Step-by-step (manual control)
-cyberagent recon example.com
-cyberagent scan example.com
-cyberagent report example.com
+# Decompose (manual step-by-step)
+jianlai recon example.com
+jianlai scan example.com
+jianlai report example.com
+
+# Natural language (just describe the target)
+jianlai "scan localhost:8765 for vulnerabilities"
 ```
 
 ## Quick Start
@@ -100,8 +137,8 @@ brew install nmap  # macOS
 ### Installation
 
 ```bash
-git clone https://github.com/Lniosy/cyberagent.git
-cd cyberagent
+git clone https://github.com/Lniosy/jianlai.git
+cd jianlai
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -116,6 +153,18 @@ docker compose build
 docker compose run recon example.com
 ```
 
+### Boot Animation
+
+The CLI plays a short *"unsheathing"* animation on startup — a horizontal blade
+draws out from its scabbard, ending on the `剑来 · JIANLAI` banner.
+Non-TTY environments (CI, pipes, redirected logs) fall back to a static banner.
+
+To disable explicitly:
+
+```bash
+JIANLAI_NO_ANIM=1 jianlai auto example.com
+```
+
 ## Tech Stack
 
 | Component | Technology |
@@ -126,18 +175,19 @@ docker compose run recon example.com
 | Knowledge Base | hack-skills (102 SKILL.md, on-demand loading) |
 | Security Tools | subfinder, httpx, nuclei, nmap |
 | Database | SQLite |
-| CLI | Click + Rich |
+| CLI | Click + Rich + prompt_toolkit |
 | Deployment | Docker + docker-compose |
 
 ## Lab Validation
 
 | Target | Tool Findings | LLM Analysis | Time | Cost |
 |--------|--------------|--------------|------|------|
-| OWASP Juice Shop | 14 IDOR + 6 headers | 10+ vulns | 6 turns/181s | $0.011 |
-| Pikachu | 9 (5 headers + 3 IDOR + 1 info) | 10+ vulns | 10 turns/484s | $0.022 |
+| OWASP Juice Shop | 14 IDOR + 6 headers | 10+ vulns | 6 turns / 181s | $0.011 |
+| Pikachu | 9 (5 headers + 3 IDOR + 1 info) | 10+ vulns | 10 turns / 484s | $0.022 |
 
 ## Acknowledgments
 
+- **《剑来》 / Fenghuo Xizhuhou** — project name and spirit
 - [**pi**](https://github.com/earendil-works/pi) — AI agent framework architecture and multi-agent orchestration design
 - [**hack-skills**](https://github.com/yaklang/hack-skills) — Security testing knowledge base (102 SKILL.md)
 - [ProjectDiscovery](https://github.com/projectdiscovery) — subfinder, httpx, nuclei

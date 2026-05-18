@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     deepseek_flash_model: str = Field(default="deepseek-v4-flash")
 
     # 数据库
-    database_path: str = Field(default="data/cyberagent.db")
+    database_path: str = Field(default="data/jianlai.db")
 
     # 并发
     max_concurrent_tasks: int = Field(default=5)

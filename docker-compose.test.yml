@@ -7,17 +7,17 @@ services:
       - "3000:3000"
     restart: unless-stopped
 
-  # CyberAgent（与靶场同网络）
-  cyberagent:
+  # 剑来 (与靶场同网络)
+  jianlai:
     build: .
-    container_name: cyberagent-test
+    container_name: jianlai-test
     env_file: .env
     depends_on:
       - juice-shop
     volumes:
       - ./data:/app/data
       - ./output:/app/output
-    entrypoint: ["cyberagent", "recon"]
+    entrypoint: ["jianlai", "recon"]
     # 需要传入 juice-shop 作为目标
     command: ["juice-shop"]
     networks:

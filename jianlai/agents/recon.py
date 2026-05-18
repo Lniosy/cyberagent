@@ -18,8 +18,8 @@ import logging
 import re
 from typing import Any
 
-from cyberagent.agents.base import BaseAgent
-from cyberagent.core.shell_executor import check_tool_exists, resolve_tool, run_command, run_commands
+from jianlai.agents.base import BaseAgent
+from jianlai.core.shell_executor import check_tool_exists, resolve_tool, run_command, run_commands
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ class ReconAgent(BaseAgent):
 
         # 写入临时文件（使用唯一文件名避免并发冲突）
         import tempfile
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", prefix="cyberagent_", delete=False)
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", prefix="jianlai_", delete=False)
         tmp.write("\n".join(probe_targets))
         tmp_input = tmp.name
         tmp.close()

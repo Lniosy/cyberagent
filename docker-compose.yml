@@ -1,7 +1,7 @@
 services:
-  cyberagent:
+  jianlai:
     build: .
-    container_name: cyberagent
+    container_name: jianlai
     env_file: .env
     volumes:
       - ./data:/app/data
@@ -16,4 +16,4 @@ services:
     volumes:
       - ./data:/app/data
       - ./output:/app/output
-    entrypoint: ["cyberagent", "recon"]
+    entrypoint: ["jianlai", "recon"]

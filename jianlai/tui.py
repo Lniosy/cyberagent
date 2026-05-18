@@ -1,9 +1,9 @@
-"""CyberAgent TUI — 交互式终端界面
+"""剑来 (Jianlai) TUI — 交互式终端界面
 
 类似 Claude Code 的体验：
-- 直接启动 cyberagent 进入交互模式
+- 直接启动 jianlai 进入交互模式
 - 输入框发送自然语言指令
-- 实时显示 Agent 输出
+- 实时显示 Agent 出剑
 - 支持历史记录、多行输入
 - Ctrl+C 退出
 """
@@ -20,21 +20,34 @@ from rich.live import Live
 from rich.table import Table
 from rich.markdown import Markdown
 
+from jianlai.branding import boot, QUOTE, QUOTE_FROM
+
 console = Console()
 
-WELCOME = """[bold cyan]CyberAgent[/bold cyan] — AI驱动的自动化漏洞挖掘
+WELCOME = """[bold red]剑来 (Jianlai)[/bold red] — AI 驱动的自主漏洞挖掘 Agent
 
-[dim]输入目标描述开始安全测试，Agent 团队自主完成一切。[/dim]
+[italic yellow]"我有一剑，可破万法"[/italic yellow] [dim]——《剑来》[/dim]
+
+[dim]描述你想测的目标，剑修自会出鞘。[/dim]
 
 [bold]示例指令：[/bold]
   • 测试 localhost:8765 上的 Pikachu 靶场
   • scan example.com for vulnerabilities
   • 帮我看看 192.168.1.100:8080 有什么安全问题
-  • /help   查看帮助
-  • /status 查看知识库状态
-  • /skills 查看可用技能
-  • exit    退出
+
+[bold]内置命令：[/bold]
+  • /help    查看帮助
+  • /status  查看知识库和系统状态
+  • /skills  查看可用招式（Skill）
+  • /agent <目标>   独行模式（单 Agent 自主循环）
+  • /team  <目标>   结阵模式（Coordinator 调度群剑）
+  • /auto  <目标>   章法模式（侦察→出剑→复盘）
+  • exit / quit / q  入鞘退出
 """
+
+
+def _no_anim() -> bool:
+    return not sys.stdout.isatty() or os.environ.get("JIANLAI_NO_ANIM") == "1"
 
 
 def run_tui():
@@ -50,24 +63,26 @@ def run_tui():
 
     # 样式
     style = Style.from_dict({
-        "prompt": "bold cyan",
+        "prompt": "bold red",
         "input": "white",
     })
 
     # 历史记录
-    history_path = os.path.expanduser("~/.cyberagent_history")
+    history_path = os.path.expanduser("~/.jianlai_history")
     session = PromptSession(
         history=FileHistory(history_path),
         auto_suggest=AutoSuggestFromHistory(),
         style=style,
     )
 
-    console.print(Panel(WELCOME, border_style="cyan"))
+    # 出剑动画 + 欢迎面板
+    boot(console, mode="交互 · 候命", fast=_no_anim())
+    console.print(Panel(WELCOME, border_style="bright_red", title="[bold]候命[/bold]"))
 
     while True:
         try:
             user_input = session.prompt(
-                [("class:prompt", "cyberagent > ")],
+                [("class:prompt", "剑来 ▸ ")],
                 style=style,
             ).strip()
 
@@ -76,7 +91,7 @@ def run_tui():
 
             # 内置命令
             if user_input.lower() in ("exit", "quit", "q"):
-                console.print("[dim]再见！[/dim]")
+                console.print("[dim]剑入鞘。江湖再见。[/dim]")
                 break
 
             if user_input == "/help":
@@ -110,34 +125,34 @@ def run_tui():
             asyncio.run(_run_natural(user_input))
 
         except KeyboardInterrupt:
-            console.print("\n[dim]Ctrl+C 退出。再按一次退出。[/dim]")
+            console.print("\n[dim]Ctrl+C — 收剑。再按 Ctrl+D 或输入 exit 离开。[/dim]")
             continue
         except EOFError:
-            console.print("\n[dim]再见！[/dim]")
+            console.print("\n[dim]剑入鞘。江湖再见。[/dim]")
             break
 
 
 def _show_help():
     """显示帮助"""
-    table = Table(title="CyberAgent 命令", show_header=True, header_style="bold cyan")
+    table = Table(title="剑来 · 招式表", show_header=True, header_style="bold red")
     table.add_column("命令", style="green")
     table.add_column("说明")
-    table.add_row("<目标描述>", "自然语言模式，Agent 自主完成（推荐）")
-    table.add_row("/agent <目标>", "自主 Agent 模式（ReAct 循环）")
-    table.add_row("/team <目标>", "团队模式（Coordinator 调度）")
-    table.add_row("/auto <目标>", "固定流水线模式")
+    table.add_row("<目标描述>", "自然语言模式 — 描述目标，Agent 自主出剑（推荐）")
+    table.add_row("/agent <目标>", "独行 — 单 Agent 自主 ReAct 循环")
+    table.add_row("/team <目标>", "结阵 — Coordinator 调度群剑齐发")
+    table.add_row("/auto <目标>", "章法 — 侦察 → 出剑 → 复盘 固定流水")
     table.add_row("/status", "查看知识库和系统状态")
-    table.add_row("/skills", "查看可用 Skill 列表")
+    table.add_row("/skills", "查看可用招式（Skill）列表")
     table.add_row("/help", "显示帮助")
-    table.add_row("exit / quit", "退出")
+    table.add_row("exit / quit / q", "入鞘退出")
     console.print(table)
 
 
 def _show_status():
     """显示系统状态"""
-    from cyberagent.core.config import get_settings
-    from cyberagent.core.knowledge import KnowledgeBase
-    from cyberagent.core.skill_loader import SkillLoader
+    from jianlai.core.config import get_settings
+    from jianlai.core.knowledge import KnowledgeBase
+    from jianlai.core.skill_loader import SkillLoader
 
     settings = get_settings()
     knowledge = KnowledgeBase()
@@ -147,7 +162,7 @@ def _show_status():
 
     skill_loader = SkillLoader()
 
-    table = Table(title="系统状态", show_header=True, header_style="bold cyan")
+    table = Table(title="剑来 · 状态", show_header=True, header_style="bold red")
     table.add_column("项目", style="green")
     table.add_column("值")
     table.add_row("DeepSeek API", "已配置" if settings.deepseek_api_key else "未配置")
@@ -166,9 +181,9 @@ def _show_status():
 
 def _show_skills():
     """显示可用 Skill"""
-    from cyberagent.core.skill_loader import SkillLoader
+    from jianlai.core.skill_loader import SkillLoader
     loader = SkillLoader()
-    table = Table(title=f"可用 Skill ({len(loader.available_skills)})", show_header=True, header_style="bold cyan")
+    table = Table(title=f"招式 · Skill ({len(loader.available_skills)})", show_header=True, header_style="bold red")
     table.add_column("Skill", style="green")
     table.add_column("描述")
     for name in sorted(loader.available_skills):
@@ -180,8 +195,8 @@ def _show_skills():
 
 async def _run_natural(description: str):
     """自然语言模式"""
-    from cyberagent.cli import _parse_target
-    from cyberagent.core.llm_client import LLMClient
+    from jianlai.cli import _parse_target
+    from jianlai.core.llm_client import LLMClient
 
     console.print(f"\n[bold cyan]目标:[/bold cyan] {description}")
 
@@ -209,15 +224,15 @@ async def _run_agent_mode(target: str):
 
 async def _run_agent_mode_internal(domain: str, local: bool, extra_ports: list[int]):
     """内部 Agent 执行"""
-    from cyberagent.core.agent_loop import AgentLoop, AgentLoopConfig
-    from cyberagent.core.session import SessionManager
-    from cyberagent.core.compaction import ContextCompressor
-    from cyberagent.core.tools import create_default_registry
-    from cyberagent.core.security_tools import register_all_tools
-    from cyberagent.core.findings_pool import FindingsPool
-    from cyberagent.core.skill_loader import SkillLoader
-    from cyberagent.core.knowledge import KnowledgeBase
-    from cyberagent.core.config import get_settings
+    from jianlai.core.agent_loop import AgentLoop, AgentLoopConfig
+    from jianlai.core.session import SessionManager
+    from jianlai.core.compaction import ContextCompressor
+    from jianlai.core.tools import create_default_registry
+    from jianlai.core.security_tools import register_all_tools
+    from jianlai.core.findings_pool import FindingsPool
+    from jianlai.core.skill_loader import SkillLoader
+    from jianlai.core.knowledge import KnowledgeBase
+    from jianlai.core.config import get_settings
 
     settings = get_settings()
     if not settings.deepseek_api_key:
@@ -226,7 +241,7 @@ async def _run_agent_mode_internal(domain: str, local: bool, extra_ports: list[i
 
     pool = FindingsPool()
     registry = create_default_registry()
-    llm = __import__("cyberagent.core.llm_client", fromlist=["LLMClient"]).LLMClient()
+    llm = __import__("jianlai.core.llm_client", fromlist=["LLMClient"]).LLMClient()
     register_all_tools(registry, pool, llm=llm, target=domain)
     skill_loader = SkillLoader()
     knowledge = KnowledgeBase()
@@ -270,9 +285,9 @@ async def _run_team_mode(target: str):
     ports = [int(p) for p in re.findall(r':(\d+)', target)]
     domain = target.split(":")[0].strip()
 
-    from cyberagent.core.agent_registry import AgentRegistry
-    from cyberagent.agents.coordinator import CoordinatorAgent, CommunicationChannel
-    from cyberagent.core.llm_client import LLMClient
+    from jianlai.core.agent_registry import AgentRegistry
+    from jianlai.agents.coordinator import CoordinatorAgent, CommunicationChannel
+    from jianlai.core.llm_client import LLMClient
 
     registry = AgentRegistry()
     registry.discover()
@@ -292,7 +307,7 @@ async def _run_team_mode(target: str):
 
 async def _run_auto_mode(target: str):
     """固定流水线模式"""
-    from cyberagent.cli import _run_auto
+    from jianlai.cli import _run_auto
     import re
     local = "localhost" in target or "127.0.0.1" in target
     ports = [int(p) for p in re.findall(r':(\d+)', target)]

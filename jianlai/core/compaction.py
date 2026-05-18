@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from cyberagent.core.llm_client import LLMClient
+from jianlai.core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 

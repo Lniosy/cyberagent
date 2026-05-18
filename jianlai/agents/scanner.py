@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode, urlparse, parse_qs, urlunparse, urljoin
 
-from cyberagent.agents.base import BaseAgent
-from cyberagent.core.shell_executor import run_command, run_commands, check_tool_exists, resolve_tool
+from jianlai.agents.base import BaseAgent
+from jianlai.core.shell_executor import run_command, run_commands, check_tool_exists, resolve_tool
 
 logger = logging.getLogger(__name__)
 

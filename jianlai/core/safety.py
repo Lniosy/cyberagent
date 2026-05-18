@@ -140,7 +140,7 @@ class SafetyChecker:
 
     def check_code_safety(self, code: str) -> tuple[bool, list[str]]:
         """检查代码是否包含危险操作（用于 PoC 审核）"""
-        from cyberagent.agents.vuln_intel import ALL_DANGEROUS_PATTERNS
+        from jianlai.agents.vuln_intel import ALL_DANGEROUS_PATTERNS
 
         issues = []
         for pattern in ALL_DANGEROUS_PATTERNS:

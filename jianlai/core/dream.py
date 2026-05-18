@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from cyberagent.core.config import PROJECT_ROOT
-from cyberagent.core.knowledge import KnowledgeBase, KnowledgeEntry
+from jianlai.core.config import PROJECT_ROOT
+from jianlai.core.knowledge import KnowledgeBase, KnowledgeEntry
 
 logger = logging.getLogger(__name__)
 

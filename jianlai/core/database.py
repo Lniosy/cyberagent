@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from cyberagent.core.config import get_settings
+from jianlai.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 

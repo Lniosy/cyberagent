@@ -10,9 +10,9 @@ import logging
 import shlex
 from typing import Any
 
-from cyberagent.core.tools import ToolDefinition, ToolResult, ToolRegistry, create_default_registry
-from cyberagent.core.findings_pool import FindingsPool, SharedFinding
-from cyberagent.core.shell_executor import run_command, run_commands, resolve_tool, check_tool_exists
+from jianlai.core.tools import ToolDefinition, ToolResult, ToolRegistry, create_default_registry
+from jianlai.core.findings_pool import FindingsPool, SharedFinding
+from jianlai.core.shell_executor import run_command, run_commands, resolve_tool, check_tool_exists
 
 logger = logging.getLogger(__name__)
 
@@ -493,7 +493,7 @@ async def _api_enum(base_url: str, pool: FindingsPool) -> ToolResult:
     base = base_url.rstrip("/")
     found = []
 
-    from cyberagent.core.shell_executor import run_commands
+    from jianlai.core.shell_executor import run_commands
     safe_base = shlex.quote(base)
     cmds = [f"curl -s -o /dev/null -w '%{{http_code}} {base}{p}' -m 3 {shlex.quote(base + p)}" for p in paths]
     results = await run_commands(cmds, timeout=5, max_concurrent=10)
@@ -828,7 +828,7 @@ async def _generate_report(target: str, pool: FindingsPool, llm) -> ToolResult:
     report = await llm.chat_pro(prompt)
 
     # 保存报告
-    from cyberagent.core.config import PROJECT_ROOT
+    from jianlai.core.config import PROJECT_ROOT
     from pathlib import Path
     import time
 
@@ -854,7 +854,7 @@ async def _complete_task(summary: str) -> ToolResult:
 
 async def _web_crawl(url: str, max_pages: int) -> ToolResult:
     """Web 爬取 — 发现所有页面和表单"""
-    from cyberagent.core.crawler import WebCrawler
+    from jianlai.core.crawler import WebCrawler
 
     crawler = WebCrawler(max_pages=max_pages)
     results = await crawler.crawl(url)
@@ -881,7 +881,7 @@ async def _web_crawl(url: str, max_pages: int) -> ToolResult:
 
 async def _form_test(url: str, pool) -> ToolResult:
     """表单漏洞测试 — 解析表单并用 POST 测试 SQLi/XSS"""
-    from cyberagent.core.crawler import WebCrawler
+    from jianlai.core.crawler import WebCrawler
 
     # 爬取页面获取表单
     crawler = WebCrawler(max_pages=1)

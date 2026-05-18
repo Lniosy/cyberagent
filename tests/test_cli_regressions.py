@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from cyberagent import cli
+from jianlai import cli
 
 
 class CliRegressionTests(unittest.TestCase):
@@ -15,7 +15,7 @@ class CliRegressionTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Usage:", result.output)
-        self.assertIn("cyberagent <目标描述>", result.output)
+        self.assertIn("jianlai <目标描述>", result.output)
 
     def test_natural_language_target_is_forwarded(self):
         captured: dict[str, object] = {}

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Iterator
 
-from cyberagent.core.config import PROJECT_ROOT
+from jianlai.core.config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class SessionManager:
         # 写入 system 条目
         session.append(
             role="system",
-            content=f"CyberAgent 会话开始 — 目标: {target}",
+            content=f"剑来 (Jianlai) 会话开始 — 目标: {target}",
             metadata={"target": target},
         )
         logger.info("[session] 创建新会话: %s", path)

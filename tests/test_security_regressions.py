@@ -4,11 +4,11 @@ import asyncio
 import unittest
 from pathlib import Path
 
-from cyberagent.core.crawler import WebCrawler
-from cyberagent.core.findings_pool import FindingsPool
-from cyberagent.core.security_tools import register_all_tools
-from cyberagent.core.shell_executor import run_command
-from cyberagent.core.tools import create_default_registry
+from jianlai.core.crawler import WebCrawler
+from jianlai.core.findings_pool import FindingsPool
+from jianlai.core.security_tools import register_all_tools
+from jianlai.core.shell_executor import run_command
+from jianlai.core.tools import create_default_registry
 
 
 class SecurityRegressionTests(unittest.TestCase):

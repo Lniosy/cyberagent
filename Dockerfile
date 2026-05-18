@@ -1,7 +1,7 @@
 FROM python:3.13-slim
 
-LABEL maintainer="cyberagent"
-LABEL description="CyberAgent - AI-driven automated vulnerability discovery"
+LABEL maintainer="jianlai"
+LABEL description="剑来 (Jianlai) — AI-driven autonomous vulnerability discovery agent"
 
 # 安装系统依赖和安全工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -54,5 +54,5 @@ RUN mkdir -p /app/data /app/output
 # 更新 nuclei 模板
 RUN nuclei -update-templates 2>/dev/null || true
 
-ENTRYPOINT ["cyberagent"]
+ENTRYPOINT ["jianlai"]
 CMD ["--help"]

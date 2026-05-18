@@ -29,9 +29,9 @@ import logging
 import re
 from typing import Any
 
-from cyberagent.agents.base import BaseAgent
-from cyberagent.core.shell_executor import run_command
-from cyberagent.core.tools import ToolResult
+from jianlai.agents.base import BaseAgent
+from jianlai.core.shell_executor import run_command
+from jianlai.core.tools import ToolResult
 
 logger = logging.getLogger(__name__)
 

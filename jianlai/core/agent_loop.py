@@ -22,12 +22,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from cyberagent.core.llm_client import LLMClient
-from cyberagent.core.session import SessionManager
-from cyberagent.core.compaction import ContextCompressor
-from cyberagent.core.tools import ToolRegistry, ToolResult
-from cyberagent.core.skill_loader import SkillLoader
-from cyberagent.core.safety import get_safety_checker
+from jianlai.core.llm_client import LLMClient
+from jianlai.core.session import SessionManager
+from jianlai.core.compaction import ContextCompressor
+from jianlai.core.tools import ToolRegistry, ToolResult
+from jianlai.core.skill_loader import SkillLoader
+from jianlai.core.safety import get_safety_checker
 
 logger = logging.getLogger(__name__)
 

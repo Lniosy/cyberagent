@@ -26,7 +26,7 @@ from typing import Any, Callable, Awaitable, Type
 
 import yaml
 
-from cyberagent.core.config import PROJECT_ROOT
+from jianlai.core.config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +72,14 @@ class AgentRegistry:
         logger.debug("[registry] 注册 Agent: %s (%s)", manifest.name, manifest.category)
 
     def discover(self):
-        """自动发现 cyberagent.agents 包下的所有 Agent"""
-        import cyberagent.agents as agents_pkg
+        """自动发现 jianlai.agents 包下的所有 Agent"""
+        import jianlai.agents as agents_pkg
 
         for importer, modname, ispkg in pkgutil.iter_modules(agents_pkg.__path__):
             if modname.startswith("_"):
                 continue
             try:
-                module = importlib.import_module(f"cyberagent.agents.{modname}")
+                module = importlib.import_module(f"jianlai.agents.{modname}")
                 # 查找有 MANIFEST 属性的模块
                 manifest_data = getattr(module, "MANIFEST", None)
                 agent_class = getattr(module, "AGENT_CLASS", None)
@@ -233,7 +233,7 @@ class Orchestrator:
     def _create_agent(self, reg: AgentRegistration, target: str, llm: Any,
                       config: dict[str, Any] | None) -> Any:
         """创建 Agent 实例"""
-        from cyberagent.agents.base import AgentContext
+        from jianlai.agents.base import AgentContext
 
         ctx = AgentContext(
             target_domain=target,

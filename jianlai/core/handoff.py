@@ -165,7 +165,7 @@ class HandoffManager:
 
 def create_coordinator_tools(handoff_mgr: HandoffManager):
     """为 Coordinator 创建 handoff 工具"""
-    from cyberagent.core.tools import ToolDefinition, ToolResult
+    from jianlai.core.tools import ToolDefinition, ToolResult
 
     tools = []
 

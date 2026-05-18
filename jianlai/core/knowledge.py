@@ -23,7 +23,7 @@ from typing import Any
 
 import sqlite3
 
-from cyberagent.core.config import get_settings, PROJECT_ROOT
+from jianlai.core.config import get_settings, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 

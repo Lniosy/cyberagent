@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urljoin, urlparse, parse_qs
 
-from cyberagent.core.shell_executor import run_command
+from jianlai.core.shell_executor import run_command
 
 logger = logging.getLogger(__name__)
 

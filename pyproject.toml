@@ -1,7 +1,7 @@
 [project]
-name = "cyberagent"
+name = "jianlai"
 version = "0.1.0"
-description = "AI-driven automated vulnerability discovery agent for bug bounty"
+description = "剑来 (Jianlai) — AI 驱动的自主漏洞挖掘 Agent | 我有一剑，可破万法"
 requires-python = ">=3.12"
 dependencies = [
     "openai>=1.50.0",
@@ -19,11 +19,11 @@ dependencies = [
 ]
 
 [project.scripts]
-cyberagent = "cyberagent.cli:main"
+jianlai = "jianlai.cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["cyberagent*"]
+include = ["jianlai*"]

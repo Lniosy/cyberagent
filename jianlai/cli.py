@@ -1,12 +1,13 @@
-"""CyberAgent CLI — 自然语言驱动的安全测试入口
+"""剑来 (Jianlai) CLI — 自然语言驱动的安全测试入口
 
-用户只需描述目标，Agent 团队自主完成一切。
+用户只需描述目标，Agent 自主出剑。
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -16,15 +17,16 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 
-from cyberagent.core.config import get_settings, PROJECT_ROOT
-from cyberagent.core.database import Database
-from cyberagent.core.llm_client import LLMClient
-from cyberagent.agents.base import AgentContext
-from cyberagent.agents.recon import ReconAgent
-from cyberagent.agents.scanner import ScannerAgent
-from cyberagent.agents.reporter import ReportAgent
-from cyberagent.agents.vuln_intel import VulnIntelAgent
-from cyberagent.agents.reviewer import ReviewerAgent
+from jianlai.branding import boot, render_banner, BRAND_NAME_CN, BRAND_NAME_EN, QUOTE
+from jianlai.core.config import get_settings, PROJECT_ROOT
+from jianlai.core.database import Database
+from jianlai.core.llm_client import LLMClient
+from jianlai.agents.base import AgentContext
+from jianlai.agents.recon import ReconAgent
+from jianlai.agents.scanner import ScannerAgent
+from jianlai.agents.reporter import ReportAgent
+from jianlai.agents.vuln_intel import VulnIntelAgent
+from jianlai.agents.reviewer import ReviewerAgent
 
 console = Console()
 
@@ -66,20 +68,21 @@ class NaturalLanguageGroup(click.Group):
 @click.option("--max-time", default=600, help="最大运行时间（秒）")
 @click.option("--resume", is_flag=True, help="断点续扫")
 def main(ctx, max_turns: int, max_time: int, resume: bool):
-    """CyberAgent — AI驱动的自动化漏洞挖掘
+    """剑来 (Jianlai) — AI 驱动的自主漏洞挖掘 Agent
 
     用法：
-      cyberagent                     # 显示帮助
-      cyberagent <目标描述>           # 自然语言模式
-      cyberagent agent <目标>         # 自主Agent模式
-      cyberagent team <目标>          # 团队协作模式
-      cyberagent auto <目标>          # 固定流水线模式
-      cyberagent recon/scan/report    # 分步执行
+      jianlai                     # 显示帮助
+      jianlai <目标描述>           # 自然语言模式（出剑）
+      jianlai agent <目标>         # 自主 Agent 模式（独行）
+      jianlai team <目标>          # 团队协作模式（结阵）
+      jianlai auto <目标>          # 固定流水线模式（章法）
+      jianlai recon/scan/report    # 分步执行（拆招）
     """
     if ctx.invoked_subcommand is not None:
         return
     target = " ".join(ctx.args).strip() or None
     if target is None:
+        console.print(render_banner(subtitle="[ 候命 ]"))
         click.echo(ctx.get_help())
         return
 
@@ -87,21 +90,27 @@ def main(ctx, max_turns: int, max_time: int, resume: bool):
     asyncio.run(_run_natural_language(target, max_turns, max_time, resume))
 
 
+def _no_anim() -> bool:
+    """非交互终端或显式关闭动画时跳过出鞘动画。"""
+    return not sys.stdout.isatty() or os.environ.get("JIANLAI_NO_ANIM") == "1"
+
+
 async def _run_natural_language(description: str, max_turns: int, max_time: int, resume: bool):
     """自然语言模式 — Agent 自主解析目标并执行"""
-    from cyberagent.core.agent_loop import AgentLoop, AgentLoopConfig
-    from cyberagent.core.session import SessionManager
-    from cyberagent.core.compaction import ContextCompressor
-    from cyberagent.core.tools import create_default_registry
-    from cyberagent.core.security_tools import register_all_tools
-    from cyberagent.core.findings_pool import FindingsPool
-    from cyberagent.core.skill_loader import SkillLoader
-    from cyberagent.core.knowledge import KnowledgeBase
+    from jianlai.core.agent_loop import AgentLoop, AgentLoopConfig
+    from jianlai.core.session import SessionManager
+    from jianlai.core.compaction import ContextCompressor
+    from jianlai.core.tools import create_default_registry
+    from jianlai.core.security_tools import register_all_tools
+    from jianlai.core.findings_pool import FindingsPool
+    from jianlai.core.skill_loader import SkillLoader
+    from jianlai.core.knowledge import KnowledgeBase
 
+    boot(console, mode="自然语言 · 出剑", fast=_no_anim())
     console.print(Panel(
-        f"[bold cyan]CyberAgent[/bold cyan]\n"
         f"目标: [bold]{description}[/bold]",
-        title="启动",
+        title="[bold red]剑指[/bold red]",
+        border_style="red",
     ))
 
     settings = get_settings()
@@ -169,7 +178,8 @@ async def _run_natural_language(description: str, max_turns: int, max_time: int,
         f"发现: {pool.summary()}\n"
         f"LLM: {llm.stats.summary()['total']}\n"
         f"知识库: {kb_final['total']} 条经验 (新增 {stats.get('knowledge_extracted', 0)} 条)",
-        title="[bold green]完成[/bold green]",
+        title="[bold green]入鞘[/bold green]",
+        border_style="green",
     ))
 
     knowledge.close()
@@ -321,19 +331,21 @@ def db_status():
 async def _run_agent(domain: str, max_turns: int, max_time: int,
                      local: bool, extra_ports: list[int], resume: bool):
     """自主 Agent 运行"""
-    from cyberagent.core.agent_loop import AgentLoop, AgentLoopConfig
-    from cyberagent.core.session import SessionManager
-    from cyberagent.core.compaction import ContextCompressor
-    from cyberagent.core.tools import create_default_registry
-    from cyberagent.core.security_tools import register_all_tools
-    from cyberagent.core.findings_pool import FindingsPool
-    from cyberagent.core.skill_loader import SkillLoader
-    from cyberagent.core.knowledge import KnowledgeBase
+    from jianlai.core.agent_loop import AgentLoop, AgentLoopConfig
+    from jianlai.core.session import SessionManager
+    from jianlai.core.compaction import ContextCompressor
+    from jianlai.core.tools import create_default_registry
+    from jianlai.core.security_tools import register_all_tools
+    from jianlai.core.findings_pool import FindingsPool
+    from jianlai.core.skill_loader import SkillLoader
+    from jianlai.core.knowledge import KnowledgeBase
 
     domain = domain.lower().strip()
+    boot(console, mode="独行 · 自主 Agent", fast=_no_anim())
     console.print(Panel(
-        f"[bold cyan]CyberAgent — 自主模式[/bold cyan]\n目标: [bold]{domain}[/bold]\n最大轮次: {max_turns} | 最大时间: {max_time}s",
-        title="自主 Agent 启动",
+        f"目标: [bold]{domain}[/bold]\n最大轮次: {max_turns} | 最大时间: {max_time}s",
+        title="[bold red]剑指[/bold red]",
+        border_style="red",
     ))
 
     settings = get_settings()
@@ -384,18 +396,19 @@ async def _run_agent(domain: str, max_turns: int, max_time: int,
         f"轮次: {stats.get('turns', 0)} | 耗时: {stats.get('elapsed', 0)}s | 完成: {stats.get('task_complete', False)}\n"
         f"发现: {pool.summary()}\nLLM: {llm.stats.summary()['total']}\n"
         f"知识库: {kb['total']} 条 (新增 {stats.get('knowledge_extracted', 0)})",
-        title="[bold green]Agent 运行结束[/bold green]",
+        title="[bold green]入鞘 · Agent 运行结束[/bold green]",
     ))
     knowledge.close()
 
 
 async def _run_team(domain: str, local: bool = False, extra_ports: list[int] | None = None):
     """Coordinator 团队模式"""
-    from cyberagent.core.agent_registry import AgentRegistry
-    from cyberagent.agents.coordinator import CoordinatorAgent, CommunicationChannel
+    from jianlai.core.agent_registry import AgentRegistry
+    from jianlai.agents.coordinator import CoordinatorAgent, CommunicationChannel
 
     domain = domain.lower().strip()
-    console.print(Panel(f"[bold cyan]CyberAgent Team[/bold cyan]\n目标: [bold]{domain}[/bold]", title="团队模式"))
+    boot(console, mode="结阵 · 群剑齐发", fast=_no_anim())
+    console.print(Panel(f"目标: [bold]{domain}[/bold]", title="[bold red]剑指[/bold red]", border_style="red"))
 
     settings = get_settings()
     if not settings.deepseek_api_key:
@@ -423,18 +436,19 @@ async def _run_team(domain: str, local: bool = False, extra_ports: list[int] | N
     console.print(Panel(
         f"Agent: {len(results.get('agents', {}))} | 耗时: {results.get('total_elapsed', 0)}s | 消息: {channel.message_count}\n"
         f"LLM: {cost['total']['calls']} 次 | Token: {cost['total']['tokens']:,} | 成本: ${cost['total']['cost_usd']:.4f}",
-        title="[bold green]团队任务完成[/bold green]",
+        title="[bold green]入鞘 · 群剑收势[/bold green]",
     ))
 
 
 async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | None = None,
                     skip_recon: bool = False, skip_scan: bool = False, skip_report: bool = False):
     """固定流水线"""
-    from cyberagent.core.knowledge import KnowledgeBase
-    from cyberagent.core.dream import DreamEngine
+    from jianlai.core.knowledge import KnowledgeBase
+    from jianlai.core.dream import DreamEngine
 
     domain = domain.lower().strip()
-    console.print(Panel(f"[bold cyan]CyberAgent Auto[/bold cyan]\n目标: [bold]{domain}[/bold]", title="流水线"))
+    boot(console, mode="章法 · 三段流水", fast=_no_anim())
+    console.print(Panel(f"目标: [bold]{domain}[/bold]", title="[bold red]剑指[/bold red]", border_style="red"))
 
     settings = get_settings()
     if not settings.deepseek_api_key:
@@ -536,14 +550,15 @@ async def _run_auto(domain: str, local: bool = False, extra_ports: list[int] | N
     cost = llm.stats.summary()
     console.print(Panel(
         f"LLM: {cost['total']['calls']} 次 | Token: {cost['total']['tokens']:,} | 成本: ${cost['total']['cost_usd']:.4f}",
-        title="[bold green]流水线完成[/bold green]",
+        title="[bold green]入鞘 · 章法已毕[/bold green]",
     ))
 
 
 async def _run_recon(domain: str, output: str | None, local: bool = False, extra_ports: list[int] | None = None):
     """侦察"""
     domain = domain.lower().strip()
-    console.print(Panel(f"[bold cyan]侦察[/bold cyan]\n目标: {domain}", title="Recon"))
+    boot(console, mode="拆招 · 侦察", fast=_no_anim())
+    console.print(Panel(f"目标: [bold]{domain}[/bold]", title="[bold cyan]望气 · Recon[/bold cyan]", border_style="cyan"))
 
     db = Database()
     db.connect()
@@ -568,7 +583,8 @@ async def _run_recon(domain: str, output: str | None, local: bool = False, extra
 async def _run_scan(domain: str, recon_file: str | None, output: str | None, local: bool = False):
     """扫描"""
     domain = domain.lower().strip()
-    console.print(Panel(f"[bold red]扫描[/bold red]\n目标: {domain}", title="Scan"))
+    boot(console, mode="拆招 · 扫描", fast=_no_anim())
+    console.print(Panel(f"目标: [bold]{domain}[/bold]", title="[bold red]出剑 · Scan[/bold red]", border_style="red"))
 
     settings = get_settings()
     recon_results = {}
@@ -607,7 +623,8 @@ async def _run_scan(domain: str, recon_file: str | None, output: str | None, loc
 async def _run_report(domain: str, recon_file: str | None, scan_file: str | None):
     """报告"""
     domain = domain.lower().strip()
-    console.print(Panel(f"[bold magenta]报告[/bold magenta]\n目标: {domain}", title="Report"))
+    boot(console, mode="拆招 · 报告", fast=_no_anim())
+    console.print(Panel(f"目标: [bold]{domain}[/bold]", title="[bold magenta]复盘 · Report[/bold magenta]", border_style="magenta"))
 
     recon_results = {}
     scan_results = {}
