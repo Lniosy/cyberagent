@@ -13,6 +13,8 @@ import asyncio
 import sys
 import os
 import json
+import re
+from urllib.parse import urlparse
 
 from rich.console import Console
 from rich.panel import Panel
@@ -40,7 +42,9 @@ def _format_progress_event(event: dict) -> str | None:
         return f"[cyan][llm] 响应完成[/cyan] 工具调用={event.get('tool_count')} 耗时={elapsed}s"
     if name == "assistant" and event.get("text"):
         text = str(event.get("text", "")).replace("\n", " ")
-        return f"[dim]思路[/dim] {text[:220]}"
+        if '"tool_calls"' in text:
+            return None
+        return f"[dim]模型计划（未验证）[/dim] {text[:220]}"
     if name == "tools_start":
         tools = ", ".join(event.get("tools", []))
         return f"[yellow][tools] 准备执行[/yellow] {tools}"
@@ -52,6 +56,8 @@ def _format_progress_event(event: dict) -> str | None:
         status = "[red]失败[/red]" if event.get("is_error") else "[green]完成[/green]"
         summary = str(event.get("summary", "")).replace("\n", " ")
         elapsed_part = f" {event.get('elapsed')}s" if event.get("elapsed") is not None else ""
+        if event.get("tool") == "load_skill":
+            summary = "已加载安全测试知识。"
         return f"[yellow][tool <-][/yellow] {event.get('tool')} {status}{elapsed_part} [dim]{summary[:220]}[/dim]"
     if name == "error":
         return f"[bold red][error] 错误[/bold red] {event.get('message')}"
@@ -241,24 +247,25 @@ async def _run_natural(description: str):
     domain = target_info["domain"]
     local = target_info.get("local", False)
     extra_ports = target_info.get("ports", [])
+    exact_url = target_info.get("url") or _extract_url(description)
 
-    console.print(f"[green]解析:[/green] {domain} | 本地={local} | 端口={extra_ports}")
+    console.print(f"[green]解析:[/green] {domain} | URL={exact_url or '-'} | 本地={local} | 端口={extra_ports}")
     console.print()
 
     # 复用 agent 模式
-    await _run_agent_mode_internal(domain, local, extra_ports)
+    await _run_agent_mode_internal(domain, local, extra_ports, exact_url=exact_url)
 
 
 async def _run_agent_mode(target: str):
     """自主 Agent 模式"""
-    import re
     local = "localhost" in target or "127.0.0.1" in target
     ports = [int(p) for p in re.findall(r':(\d+)', target)]
-    domain = target.split(":")[0].strip()
-    await _run_agent_mode_internal(domain, local, ports)
+    exact_url = _extract_url(target)
+    domain = _domain_from_url_or_target(exact_url or target)
+    await _run_agent_mode_internal(domain, local, ports, exact_url=exact_url)
 
 
-async def _run_agent_mode_internal(domain: str, local: bool, extra_ports: list[int]):
+async def _run_agent_mode_internal(domain: str, local: bool, extra_ports: list[int], exact_url: str | None = None):
     """内部 Agent 执行"""
     from jianlai.core.agent_loop import AgentLoop, AgentLoopConfig
     from jianlai.core.session import SessionManager
@@ -298,13 +305,20 @@ async def _run_agent_mode_internal(domain: str, local: bool, extra_ports: list[i
         progress_callback=progress,
     )
 
-    initial_ctx = f"目标: {domain}\n"
+    initial_ctx = f"目标主机: {domain}\n"
+    if exact_url:
+        initial_ctx += (
+            f"用户明确给出的完整入口 URL: {exact_url}\n"
+            "必须优先围绕这个完整 URL 测试；不要擅自改成根域名、HTTPS 或其他端口，除非工具结果证明需要扩展。\n"
+        )
+    if extra_ports:
+        initial_ctx += f"用户描述中出现的端口: {extra_ports}\n"
     if local and extra_ports:
-        initial_ctx += f"本地模式，已知端口: {extra_ports}\n请直接使用 http://{domain}:{extra_ports[0]} 作为探测目标。\n"
+        initial_ctx += f"本地模式，请优先使用 http://{domain}:{extra_ports[0]}。\n"
     initial_ctx += f"已注册 {len(registry.get_all())} 个安全工具。\n{pool.to_context_string()}"
 
     try:
-        stats = await loop.run(target=domain, initial_context=initial_ctx)
+        stats = await loop.run(target=exact_url or domain, initial_context=initial_ctx)
     except KeyboardInterrupt:
         loop.abort()
         session.force_flush()
@@ -355,3 +369,15 @@ async def _run_auto_mode(target: str):
     ports = [int(p) for p in re.findall(r':(\d+)', target)]
     domain = target.split(":")[0].strip()
     await _run_auto(domain, local=local, extra_ports=ports)
+
+
+def _extract_url(text: str) -> str | None:
+    match = re.search(r"https?://[^\s，,。)）]+", text)
+    return match.group(0)
+
+
+def _domain_from_url_or_target(value: str) -> str:
+    if value.startswith(("http://", "https://")):
+        parsed = urlparse(value)
+        return parsed.hostname or value
+    return value.split(":")[0].split("/")[0].strip()

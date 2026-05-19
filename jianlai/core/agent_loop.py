@@ -436,7 +436,43 @@ class AgentLoop:
         except json.JSONDecodeError:
             text = response
 
+        # 兼容部分模型把 function call JSON 写进 content 的情况。
+        # 之前这种内容会被当作“思路”展示，造成看似卡住/重复，且不会实际执行工具。
+        if not tool_calls and isinstance(text, str) and '"tool_calls"' in text:
+            extracted_text, extracted_calls = self._extract_embedded_tool_calls(text)
+            if extracted_calls:
+                text = extracted_text
+                tool_calls = extracted_calls
+
         return text, tool_calls
+
+    def _extract_embedded_tool_calls(self, text: str) -> tuple[str, list[dict[str, Any]]]:
+        """从 assistant content 中提取被模型写成文本的 tool_calls JSON。"""
+        candidates: list[tuple[int, str]] = []
+        for marker in ('{"role"', '{"tool_calls"'):
+            idx = text.find(marker)
+            if idx >= 0:
+                candidates.append((idx, text[idx:].strip()))
+
+        stripped = text.strip()
+        if stripped.startswith("{"):
+            candidates.append((0, stripped))
+
+        for idx, candidate in candidates:
+            try:
+                data = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+
+            calls = data.get("tool_calls", [])
+            if isinstance(calls, list) and calls:
+                prefix = text[:idx].strip()
+                content = data.get("content") or prefix
+                if isinstance(content, str) and content.strip().startswith("{"):
+                    content = prefix
+                return content.strip(), calls
+
+        return text, []
 
     async def _execute_tool_calls(self, tool_calls: list[dict[str, Any]]):
         """执行工具调用（对齐 pi tool execution）"""
