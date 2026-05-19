@@ -140,13 +140,13 @@ brew install nmap  # macOS
 Windows PowerShell：
 
 ```powershell
-irm https://raw.githubusercontent.com/Lniosy/jianlai/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Lniosy/jianlai/master/scripts/install.ps1 | iex
 ```
 
 Linux / macOS / WSL：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lniosy/jianlai/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Lniosy/jianlai/master/scripts/install.sh | bash
 ```
 
 安装后编辑配置，填入 DeepSeek API Key：

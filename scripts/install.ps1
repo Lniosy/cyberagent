@@ -2,17 +2,17 @@
 Jianlai user-level installer for Windows PowerShell.
 
 One-line install after publishing:
-  irm https://raw.githubusercontent.com/Lniosy/jianlai/main/scripts/install.ps1 | iex
+  irm https://raw.githubusercontent.com/Lniosy/jianlai/master/scripts/install.ps1 | iex
 
 Optional environment variables:
   JIANLAI_REPO_URL   Git repository URL. Default: https://github.com/Lniosy/jianlai.git
-  JIANLAI_BRANCH     Git branch/ref. Default: main
+  JIANLAI_BRANCH     Git branch/ref. Default: master
   JIANLAI_INSTALL_DIR Install root. Default: %LOCALAPPDATA%\jianlai
 #>
 $ErrorActionPreference = "Stop"
 
 $RepoUrl = if ($env:JIANLAI_REPO_URL) { $env:JIANLAI_REPO_URL } else { "https://github.com/Lniosy/jianlai.git" }
-$Branch = if ($env:JIANLAI_BRANCH) { $env:JIANLAI_BRANCH } else { "main" }
+$Branch = if ($env:JIANLAI_BRANCH) { $env:JIANLAI_BRANCH } else { "master" }
 $InstallRoot = if ($env:JIANLAI_INSTALL_DIR) { $env:JIANLAI_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "jianlai" }
 $AppDir = Join-Path $InstallRoot "app"
 $VenvDir = Join-Path $InstallRoot ".venv"

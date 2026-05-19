@@ -3,15 +3,15 @@ set -euo pipefail
 
 # Jianlai user-level installer for Linux/macOS/WSL.
 # One-line install after publishing:
-#   curl -fsSL https://raw.githubusercontent.com/Lniosy/jianlai/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Lniosy/jianlai/master/scripts/install.sh | bash
 #
 # Optional environment variables:
 #   JIANLAI_REPO_URL     Git repository URL. Default: https://github.com/Lniosy/jianlai.git
-#   JIANLAI_BRANCH       Git branch/ref. Default: main
+#   JIANLAI_BRANCH       Git branch/ref. Default: master
 #   JIANLAI_INSTALL_DIR  Install root. Default: ~/.local/share/jianlai
 
 REPO_URL="${JIANLAI_REPO_URL:-https://github.com/Lniosy/jianlai.git}"
-BRANCH="${JIANLAI_BRANCH:-main}"
+BRANCH="${JIANLAI_BRANCH:-master}"
 INSTALL_ROOT="${JIANLAI_INSTALL_DIR:-$HOME/.local/share/jianlai}"
 APP_DIR="$INSTALL_ROOT/app"
 VENV_DIR="$INSTALL_ROOT/.venv"
