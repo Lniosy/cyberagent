@@ -5,6 +5,9 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
+USER_CONFIG_DIR = Path(os.environ.get("JIANLAI_HOME", Path.home() / ".jianlai")).expanduser()
+USER_ENV_FILE = USER_CONFIG_DIR / ".env"
+PROJECT_ENV_FILE = PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -23,11 +26,20 @@ class Settings(BaseSettings):
     # 日志
     log_level: str = Field(default="INFO")
 
-    model_config = {"env_file": str(PROJECT_ROOT / ".env"), "env_file_encoding": "utf-8"}
+    # 配置优先级：
+    # 1. 真实环境变量（pydantic-settings 默认最高）
+    # 2. 用户级配置 ~/.jianlai/.env（适合全局安装后任意目录启动）
+    # 3. 项目根目录 .env（适合源码开发）
+    model_config = {
+        "env_file": (str(PROJECT_ENV_FILE), str(USER_ENV_FILE)),
+        "env_file_encoding": "utf-8",
+    }
 
     @property
     def db_full_path(self) -> Path:
-        p = PROJECT_ROOT / self.database_path
+        p = Path(self.database_path).expanduser()
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
 

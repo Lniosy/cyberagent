@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 jianlai = "jianlai.cli:main"
+jianlai-tui = "jianlai.tui:run_tui"
 
 [build-system]
 requires = ["setuptools>=68.0"]

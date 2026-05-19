@@ -71,8 +71,9 @@ def main(ctx, max_turns: int, max_time: int, resume: bool):
     """剑来 (Jianlai) — AI 驱动的自主漏洞挖掘 Agent
 
     用法：
-      jianlai                     # 显示帮助
+      jianlai                     # 启动交互式 TUI
       jianlai <目标描述>           # 自然语言模式（出剑）
+      jianlai tui                 # 启动交互式 TUI
       jianlai agent <目标>         # 自主 Agent 模式（独行）
       jianlai team <目标>          # 团队协作模式（结阵）
       jianlai auto <目标>          # 固定流水线模式（章法）
@@ -82,8 +83,8 @@ def main(ctx, max_turns: int, max_time: int, resume: bool):
         return
     target = " ".join(ctx.args).strip() or None
     if target is None:
-        console.print(render_banner(subtitle="[ 候命 ]"))
-        click.echo(ctx.get_help())
+        from jianlai.tui import run_tui
+        run_tui()
         return
 
     setup_logging()
@@ -299,6 +300,13 @@ def report(domain: str, recon_file: str | None, scan_file: str | None):
     """生成报告"""
     setup_logging()
     asyncio.run(_run_report(domain, recon_file, scan_file))
+
+
+@main.command()
+def tui():
+    """启动交互式 TUI"""
+    from jianlai.tui import run_tui
+    run_tui()
 
 
 @main.command()

@@ -133,17 +133,70 @@ go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 brew install nmap  # macOS
 ```
 
-### 安装
+### 一行安装（推荐）
+
+安装器会把项目安装到用户目录，创建独立 Python 3.12 venv，生成全局 `jianlai` 命令，并创建用户级配置文件 `~/.jianlai/.env`。
+
+Windows PowerShell：
+
+```powershell
+irm https://raw.githubusercontent.com/Lniosy/jianlai/main/scripts/install.ps1 | iex
+```
+
+Linux / macOS / WSL：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lniosy/jianlai/main/scripts/install.sh | bash
+```
+
+安装后编辑配置，填入 DeepSeek API Key：
+
+```powershell
+# Windows
+notepad "$HOME\.jianlai\.env"
+```
+
+```bash
+# Linux / macOS / WSL
+${EDITOR:-nano} ~/.jianlai/.env
+```
+
+然后打开一个新终端，在任意目录运行：
+
+```bash
+jianlai
+```
+
+> 如果仓库地址或分支不同，可以先设置 `JIANLAI_REPO_URL` / `JIANLAI_BRANCH` 再运行安装器。
+
+### 源码开发安装
 
 ```bash
 git clone https://github.com/Lniosy/jianlai.git
 cd jianlai
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 cp .env.example .env
 # 编辑 .env，填入 DeepSeek API Key
 ```
+
+### 启动 TUI
+
+安装后直接输入项目命令即可进入交互式终端：
+
+```bash
+jianlai
+```
+
+也可以使用显式 TUI 命令启动：
+
+```bash
+jianlai tui
+jianlai-tui
+```
+
+这里参考的是 Hermes 的启动体验：直接输入主命令进入 TUI。项目名称和命令仍然统一使用 `jianlai`。
 
 ### Docker
 
