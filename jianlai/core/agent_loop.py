@@ -20,7 +20,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from jianlai.core.llm_client import LLMClient
 from jianlai.core.session import SessionManager
@@ -111,6 +111,7 @@ class AgentLoop:
         config: AgentLoopConfig | None = None,
         skill_loader: SkillLoader | None = None,
         knowledge: Any | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ):
         self.llm = llm
         self.tools = tools
@@ -119,6 +120,7 @@ class AgentLoop:
         self.config = config or AgentLoopConfig()
         self.skill_loader = skill_loader or SkillLoader()
         self.knowledge = knowledge  # KnowledgeBase 实例
+        self.progress_callback = progress_callback
 
         self._steering_queue: asyncio.Queue[str] = asyncio.Queue()
         self._followup_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -126,6 +128,20 @@ class AgentLoop:
         self._start_time: float = 0
         self._abort: bool = False
         self._task_complete: bool = False
+
+    def _emit_progress(self, event: str, **data: Any) -> None:
+        """向 TUI/CLI 发出进度事件；回调异常不能影响主流程。"""
+        if not self.progress_callback:
+            return
+        try:
+            self.progress_callback({
+                "event": event,
+                "turn": self._turn_count,
+                "elapsed": round(time.time() - self._start_time, 1) if self._start_time else 0,
+                **data,
+            })
+        except Exception as e:
+            logger.debug("[loop] progress callback failed: %s", e)
 
     # ---- 公共接口 ----
 
@@ -185,6 +201,7 @@ class AgentLoop:
         self.session.append(role="user", content=task_prompt)
 
         logger.info("[loop] Agent 循环启动 — 目标: %s, 最大轮次: %d", target, self.config.max_turns)
+        self._emit_progress("start", target=target, max_turns=self.config.max_turns)
 
         # ---- 主循环（对齐 pi 双层 while）----
         while not self._should_stop():
@@ -201,6 +218,7 @@ class AgentLoop:
 
                 # 2. 构建 LLM 上下文
                 messages = await self._build_messages()
+                self._emit_progress("llm_start", message_count=len(messages))
 
                 # 3. 调用 LLM
                 try:
@@ -210,16 +228,19 @@ class AgentLoop:
                     error_msg = f"[系统提示] LLM 调用失败: {str(e)}。请分析原因并尝试其他方法，不要放弃任务。"
                     self.session.append(role="system", content=error_msg)
                     logger.error("[loop] LLM 调用失败: %s", e)
+                    self._emit_progress("error", message=f"LLM 调用失败: {e}")
                     has_more_tools = False
                     continue
 
                 # 4. 解析响应
                 text, tool_calls = self._parse_response(response)
+                self._emit_progress("llm_done", tool_count=len(tool_calls))
 
                 # 5. 记录 assistant 响应
                 if text:
                     self.session.append(role="assistant", content=text)
                     logger.info("[loop] Turn %d: %s", self._turn_count, text[:100])
+                    self._emit_progress("assistant", text=text[:500])
 
                 # 6. 检查是否完成
                 if self._task_complete:
@@ -294,6 +315,7 @@ class AgentLoop:
 
         logger.info("[loop] Agent 循环结束 — %d 轮, %.1fs, 完成=%s",
                      self._turn_count, elapsed, self._task_complete)
+        self._emit_progress("done", stats=stats)
 
         return stats
 
@@ -434,6 +456,8 @@ class AgentLoop:
         if not calls:
             return
 
+        self._emit_progress("tools_start", tools=[name for name, _ in calls])
+
         # 分离内置工具和注册工具
         builtin_calls = []
         registry_calls = []
@@ -458,6 +482,7 @@ class AgentLoop:
 
         # 执行内置工具（load_skill）
         for name, args in builtin_calls:
+            self._emit_progress("tool_start", tool=name, args=args)
             vuln_type = args.get("vuln_type", "")
             skill_content = self.skill_loader.load_for_vuln_type(vuln_type)
             if not skill_content:
@@ -468,8 +493,11 @@ class AgentLoop:
                 tool_name=name, tool_args=args,
                 tool_result=result.to_dict(),
             )
+            self._emit_progress("tool_done", tool=name, is_error=result.is_error, summary=result.content[:300])
 
         # 批量执行注册工具（根据 executionMode 自动决定并行/串行）
+        for name, args in registry_calls:
+            self._emit_progress("tool_start", tool=name, args=args)
         results = await self.tools.execute_batch(registry_calls)
         calls = registry_calls  # 后续只处理注册工具的结果
 
@@ -482,6 +510,13 @@ class AgentLoop:
                 tool_args=args,
                 tool_result=result.to_dict(),
                 is_error=result.is_error,
+            )
+            self._emit_progress(
+                "tool_done",
+                tool=name,
+                is_error=result.is_error,
+                elapsed=result.metadata.get("elapsed"),
+                summary=result.content[:500],
             )
 
             # 检查是否需要终止

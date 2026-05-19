@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import os
+import json
 
 from rich.console import Console
 from rich.panel import Panel
@@ -23,6 +24,41 @@ from rich.markdown import Markdown
 from jianlai.branding import boot, QUOTE, QUOTE_FROM
 
 console = Console()
+
+
+def _format_progress_event(event: dict) -> str | None:
+    """把 AgentLoop 进度事件格式化为 TUI 可读日志。"""
+    name = event.get("event")
+    turn = event.get("turn", 0)
+    elapsed = event.get("elapsed", 0)
+
+    if name == "start":
+        return f"[bold green][start] 开始[/bold green] 目标={event.get('target')} 最大轮次={event.get('max_turns')}"
+    if name == "llm_start":
+        return f"[cyan][llm] 第 {turn + 1} 轮[/cyan] 正在请求 LLM... 消息={event.get('message_count')}"
+    if name == "llm_done":
+        return f"[cyan][llm] 响应完成[/cyan] 工具调用={event.get('tool_count')} 耗时={elapsed}s"
+    if name == "assistant" and event.get("text"):
+        text = str(event.get("text", "")).replace("\n", " ")
+        return f"[dim]思路[/dim] {text[:220]}"
+    if name == "tools_start":
+        tools = ", ".join(event.get("tools", []))
+        return f"[yellow][tools] 准备执行[/yellow] {tools}"
+    if name == "tool_start":
+        args = event.get("args", {})
+        arg_text = json.dumps(args, ensure_ascii=False)
+        return f"[yellow][tool ->][/yellow] {event.get('tool')} {arg_text[:180]}"
+    if name == "tool_done":
+        status = "[red]失败[/red]" if event.get("is_error") else "[green]完成[/green]"
+        summary = str(event.get("summary", "")).replace("\n", " ")
+        elapsed_part = f" {event.get('elapsed')}s" if event.get("elapsed") is not None else ""
+        return f"[yellow][tool <-][/yellow] {event.get('tool')} {status}{elapsed_part} [dim]{summary[:220]}[/dim]"
+    if name == "error":
+        return f"[bold red][error] 错误[/bold red] {event.get('message')}"
+    if name == "done":
+        stats = event.get("stats", {})
+        return f"[bold green][done] 完成[/bold green] 轮次={stats.get('turns')} 耗时={stats.get('elapsed')}s"
+    return None
 
 WELCOME = """[bold red]剑来 (Jianlai)[/bold red] — AI 驱动的自主漏洞挖掘 Agent
 
@@ -250,10 +286,16 @@ async def _run_agent_mode_internal(domain: str, local: bool, extra_ports: list[i
     config = AgentLoopConfig(max_turns=15, max_time=600, auto_mode=True)
     compressor = ContextCompressor(llm)
 
+    def progress(event: dict):
+        line = _format_progress_event(event)
+        if line:
+            console.print(line)
+
     loop = AgentLoop(
         llm=llm, tools=registry, session=session,
         compressor=compressor, config=config,
         skill_loader=skill_loader, knowledge=knowledge,
+        progress_callback=progress,
     )
 
     initial_ctx = f"目标: {domain}\n"
