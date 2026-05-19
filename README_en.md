@@ -1,9 +1,12 @@
-# Jianlai (剑来)
+# 剑来 · Jianlai-Sec
 
 > **"With one sword, I can break every law."**
 > — *Jianlai* by Fenghuo Xizhuhou
 
 An AI-driven autonomous vulnerability discovery agent for bug bounty programs.
+
+> **PyPI / repo name:** `jianlai-sec` (disambiguates from the generic `jianlai`)
+> **CLI / Python package:** `jianlai` (short, keeps the original sword name)
 
 [中文文档](README.md)
 
@@ -137,8 +140,8 @@ brew install nmap  # macOS
 ### Installation
 
 ```bash
-git clone https://github.com/Lniosy/jianlai.git
-cd jianlai
+git clone https://github.com/Lniosy/jianlai-sec.git
+cd jianlai-sec
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .

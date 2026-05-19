@@ -1,7 +1,7 @@
 FROM python:3.13-slim
 
-LABEL maintainer="jianlai"
-LABEL description="剑来 (Jianlai) — AI-driven autonomous vulnerability discovery agent"
+LABEL maintainer="jianlai-sec"
+LABEL description="剑来 (Jianlai-Sec) — AI-driven autonomous vulnerability discovery agent"
 
 # 安装系统依赖和安全工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
