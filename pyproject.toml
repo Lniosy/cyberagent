@@ -1,7 +1,7 @@
 [project]
-name = "jianlai-sec"
+name = "jianlai"
 version = "0.1.0"
-description = "剑来 (Jianlai-Sec) — AI 驱动的自主漏洞挖掘 Agent | 我有一剑，可破万法"
+description = "剑来 (Jianlai) — AI 驱动的自主漏洞挖掘 Agent | 我有一剑，可破万法"
 requires-python = ">=3.12"
 dependencies = [
     "openai>=1.50.0",

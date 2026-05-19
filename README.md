@@ -1,12 +1,9 @@
-# 剑来 · Jianlai-Sec
+# 剑来 · Jianlai
 
 > **"我有一剑，可破万法。"**
 > ——《剑来》· 烽火戏诸侯
 
 AI 驱动的自主漏洞挖掘 Agent，面向 SRC 赏金计划。
-
-> **PyPI / 仓库名：** `jianlai-sec`（避免 `jianlai` 这个泛名歧义）
-> **CLI / Python 包名：** `jianlai`（短小好打，保留剑来本名）
 
 [English](README_en.md)
 
@@ -139,8 +136,8 @@ brew install nmap  # macOS
 ### 安装
 
 ```bash
-git clone https://github.com/Lniosy/jianlai-sec.git
-cd jianlai-sec
+git clone https://github.com/Lniosy/jianlai.git
+cd jianlai
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
