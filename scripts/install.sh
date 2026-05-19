@@ -58,6 +58,15 @@ else
   git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
 fi
 
+SKILLS_DIR="$APP_DIR/references/hack-skills"
+step "Fetching hack-skills knowledge base"
+if [ -d "$SKILLS_DIR/.git" ]; then
+  git -C "$SKILLS_DIR" pull --ff-only
+else
+  mkdir -p "$(dirname "$SKILLS_DIR")"
+  git clone --depth 1 https://github.com/yaklang/hack-skills.git "$SKILLS_DIR"
+fi
+
 step "Using Python: $PYTHON_BIN"
 if [ ! -x "$VENV_DIR/bin/python" ]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"

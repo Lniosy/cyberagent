@@ -179,6 +179,7 @@ source .venv/bin/activate
 pip install -e .
 cp .env.example .env
 # 编辑 .env，填入 DeepSeek API Key
+git clone --depth 1 https://github.com/yaklang/hack-skills.git references/hack-skills
 ```
 
 ### 启动 TUI

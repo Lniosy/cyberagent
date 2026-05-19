@@ -70,6 +70,16 @@ if (Test-Path (Join-Path $AppDir ".git")) {
 }
 if ($LASTEXITCODE -ne 0) { throw "Git operation failed." }
 
+$SkillsDir = Join-Path $AppDir "references\hack-skills"
+Write-Step "Fetching hack-skills knowledge base"
+if (Test-Path (Join-Path $SkillsDir ".git")) {
+    git -C $SkillsDir pull --ff-only
+} else {
+    New-Item -ItemType Directory -Force -Path (Split-Path $SkillsDir -Parent) | Out-Null
+    git clone --depth 1 https://github.com/yaklang/hack-skills.git $SkillsDir
+}
+if ($LASTEXITCODE -ne 0) { throw "Failed to fetch hack-skills." }
+
 $PyCmd = @(Get-Python312Command)
 Write-Step "Using Python: $($PyCmd -join ' ')"
 if (-not (Test-Path (Join-Path $VenvDir "Scripts\python.exe"))) {
